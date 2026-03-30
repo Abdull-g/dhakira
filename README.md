@@ -119,14 +119,16 @@ For Anthropic-format tools, Dhakira auto-detects the format from the request —
 ## CLI
 
 ```
-dhakira init       Set up Dhakira for the first time
-dhakira start      Start the proxy (foreground)
-dhakira start -d   Start in background (daemon)
-dhakira start -v   Verbose — show what memories are injected
-dhakira stop       Stop a running instance
-dhakira status     Show stats
-dhakira reset      Delete your wallet and start fresh
+npx dhakira init       Set up Dhakira for the first time
+npx dhakira start      Start the proxy (foreground)
+npx dhakira start -d   Start in background (daemon)
+npx dhakira start -v   Verbose — show what memories are injected
+npx dhakira stop       Stop a running instance
+npx dhakira status     Show stats
+npx dhakira reset      Delete your wallet and start fresh
 ```
+
+Or install globally for convenience: `npm install -g dhakira` — then use `dhakira` directly.
 
 ### Status
 
