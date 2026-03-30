@@ -499,9 +499,39 @@ async function commandInit(): Promise<void> {
   await import('./index.js')
 }
 
+/** Check if a port is already in use */
+async function isPortInUse(port: number, host: string): Promise<boolean> {
+  const net = await import('node:net')
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', () => resolve(true))
+    server.once('listening', () => {
+      server.close()
+      resolve(false)
+    })
+    server.listen(port, host)
+  })
+}
+
 async function commandStart(args: string[]): Promise<void> {
   const daemon = args.includes('-d') || args.includes('--daemon')
   const verbose = args.includes('-v') || args.includes('--verbose')
+
+  // Check if already running before doing anything
+  if (!daemon) {
+    const walletDir = await resolveWalletDir()
+    const pid = await readPid(walletDir)
+    if (pid !== null && isProcessRunning(pid)) {
+      console.log(`\n  ${c.yellow('Already running.')} ${c.dim(`(PID ${pid})`)}`)
+      console.log(`  Run ${c.cyan(`${cmdPrefix()} stop`)} first, or ${c.cyan(`${cmdPrefix()} status`)} to check.\n`)
+      return
+    }
+    if (await isPortInUse(4100, '127.0.0.1')) {
+      console.log(`\n  ${c.yellow('Port 4100 is already in use.')} Something is running on that port.`)
+      console.log(`  Run ${c.cyan(`${cmdPrefix()} stop`)} or check what's using it.\n`)
+      return
+    }
+  }
 
   if (daemon) {
     const scriptPath = process.argv[1] ?? ''
