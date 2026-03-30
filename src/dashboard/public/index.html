@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dhakira</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M17 5.5 C21 7 22 11 22 14 C22 18.4 18.4 22 14 22 C9.6 22 6 18.4 6 14 C6 11 7.5 9 10 8"
+                stroke="var(--text)" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="18.5" cy="4" r="2.5" fill="var(--accent)"/>
+        </svg>
+        <span>Dhakira</span>
+      </div>
+
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-page="conversations">
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Turns</span>
+          <span class="nav-badge" id="conversations-count"></span>
+        </a>
+        <a href="#" class="nav-item" data-page="profile">
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span>Profile</span>
+        </a>
+        <a href="#" class="nav-item" data-page="settings">
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.07 4.93a10 10 0 0 1 1.41 14.14M4.93 19.07a10 10 0 0 1-1.41-14.14"/>
+            <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+          <span>Settings</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div id="incognito-indicator" class="incognito-chip hidden">
+          <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          Paused
+        </div>
+        <div class="status-dot-row" id="status-dot-row">
+          <span class="status-dot active" id="status-dot"></span>
+          <span class="status-dot-label" id="status-dot-label">Listening</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- Conversations Page -->
+      <section id="page-conversations" class="page active">
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1>Turns</h1>
+            <p class="page-subtitle">What Dhakira remembers from your conversations.</p>
+          </div>
+        </div>
+
+        <div class="filter-bar">
+          <div class="search-wrap">
+            <svg aria-hidden="true" class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input type="text" id="search-input" class="search-input" placeholder="Search turns…" autocomplete="off" />
+            <kbd class="search-kbd">/</kbd>
+          </div>
+          <span class="search-count hidden" id="search-count"></span>
+        </div>
+
+        <div id="conversations-list" class="turns-list"></div>
+      </section>
+
+      <!-- Profile Page -->
+      <section id="page-profile" class="page">
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1>Profile</h1>
+            <p class="page-subtitle">Your context, injected into every conversation.</p>
+          </div>
+          <button type="button" id="save-profile" class="btn btn-primary">Save</button>
+        </div>
+        <div class="profile-layout">
+          <div class="profile-editor-wrap">
+            <label class="field-label">profile.md</label>
+            <textarea id="profile-editor" class="profile-editor" placeholder="## Stable&#10;- Name: Your Name&#10;- Based in: City, Country&#10;&#10;## Active&#10;- Building: ..."></textarea>
+          </div>
+          <div class="profile-preview-wrap">
+            <label class="field-label">Injection preview</label>
+            <div class="profile-preview">
+              <div class="injection-header">
+                <span class="injection-label">dhakira_context</span>
+              </div>
+              <pre id="profile-preview-text" class="injection-body"></pre>
+              <div class="injection-note">Prepended to every conversation via the proxy.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings Page -->
+      <section id="page-settings" class="page">
+        <div class="page-header">
+          <div class="page-header-text">
+            <h1>Settings</h1>
+            <p class="page-subtitle">How Dhakira behaves.</p>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <div class="card">
+            <h2 class="card-title">Memory</h2>
+            <div id="status-content" class="status-list"></div>
+          </div>
+
+          <div class="card">
+            <h2 class="card-title">Incognito Mode</h2>
+            <p class="card-desc">Pauses everything. Your tools work normally, but Dhakira stops listening and remembering.</p>
+            <div class="toggle-row">
+              <span id="incognito-label">Dhakira is active</span>
+              <label class="toggle">
+                <input type="checkbox" id="incognito-toggle" />
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Turn Detail Modal -->
+  <div id="turn-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 id="modal-title">Turn Detail</h3>
+          <span id="modal-subtitle" class="modal-subtitle"></span>
+        </div>
+        <button type="button" class="modal-close" id="modal-close" aria-label="Close">
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+      <div class="modal-footer">
+        <button type="button" id="modal-cancel" class="btn btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
