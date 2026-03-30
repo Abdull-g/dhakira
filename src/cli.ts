@@ -319,12 +319,20 @@ function generateSystemdService(execPath: string, scriptPath: string): string {
 // Commands
 // ---------------------------------------------------------------------------
 
+/** Detect if running via npx or as a global install */
+function cmdPrefix(): string {
+  const execPath = process.argv[1] ?? ''
+  // npx puts binaries in a _npx cache dir; global installs go to bin/
+  return execPath.includes('_npx') ? 'npx dhakira' : 'dhakira'
+}
+
 function printHelp(): void {
+  const cmd = cmdPrefix()
   console.log(`
   ${c.bold('dhakira')} — Your AI, with memory.
 
   ${c.bold('Usage:')}
-    dhakira [command]
+    ${cmd} [command]
 
   ${c.bold('Commands:')}
     ${c.cyan('init')}       Set up Dhakira for the first time
@@ -338,7 +346,9 @@ function printHelp(): void {
     start -d   Run in background (daemon mode)
     start -v   Show verbose injection details
 
-  ${c.dim('Docs: https://github.com/dhakira/dhakira')}
+  ${c.bold('Tip:')}  Install globally for convenience: ${c.dim('npm install -g dhakira')}
+
+  ${c.dim('Docs: https://github.com/Abdull-g/dhakira')}
 `)
 }
 
@@ -350,9 +360,10 @@ async function commandInit(): Promise<void> {
   // Check if already initialized
   try {
     await stat(walletDir)
+    const cmd = cmdPrefix()
     console.log(`  ${c.yellow('⚠')}  Wallet already exists at ${c.cyan(tildePath(walletDir))}`)
     console.log(
-      `  Run ${c.cyan('dhakira start')} to start, or ${c.cyan('dhakira reset')} to start fresh.\n`,
+      `  Run ${c.cyan(`${cmd} start`)} to start, or ${c.cyan(`${cmd} reset`)} to start fresh.\n`,
     )
     return
   } catch {
@@ -441,12 +452,12 @@ async function commandInit(): Promise<void> {
         console.log(`  ${c.green('✓')} Added to login items`)
       } else {
         console.log(
-          `  ${c.dim('  Auto-start not supported on this platform. Start manually with: dhakira start')}`,
+          `  ${c.dim(`  Auto-start not supported on this platform. Start manually with: ${cmdPrefix()} start`)}`,
         )
       }
     } catch {
       console.log(
-        `  ${c.yellow('!')}  Could not set up auto-start. Start manually with: dhakira start`,
+        `  ${c.yellow('!')}  Could not set up auto-start. Start manually with: ${cmdPrefix()} start`,
       )
     }
   }
