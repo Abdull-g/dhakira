@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Warm dark background -->
+  <rect width="32" height="32" rx="7" fill="#1A1209"/>
+  <!-- Body of 0  curved sweep from upper-right, arcing left and down -->
+  <path d="M22 10 C25 12 26 15 26 18 C26 22.4 22.4 26 18 26 C13.6 26 10 22.4 10 18 C10 15 11.5 12.5 14 11.5"
+        stroke="#FFFDD0" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <!-- Dot of 0 -->
+  <circle cx="23" cy="7.5" r="3" fill="#8B3306"/>
+</svg>

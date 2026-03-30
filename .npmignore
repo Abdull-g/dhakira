@@ -1,0 +1,12 @@
+src/
+test/
+benchmark/
+docs/
+landing/
+CLAUDE.md
+CLI-BUILD-SPEC.md
+biome.json
+tsconfig.json
+.gitignore
+*.test.ts
+*.test.js

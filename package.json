@@ -1,0 +1,59 @@
+{
+  "name": "dhakira",
+  "version": "0.1.3",
+  "description": "Your AI, with memory. Local-first portable AI memory system.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "bin": {
+    "dhakira": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && cp -r src/dashboard/public dist/dashboard/public",
+    "start": "node dist/cli.js start",
+    "dev": "tsx src/cli.ts start",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "check": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "memory",
+    "local-first",
+    "proxy",
+    "dhakira",
+    "claude",
+    "cursor"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Abdull-g/dhakira.git"
+  },
+  "homepage": "https://github.com/Abdull-g/dhakira",
+  "bugs": {
+    "url": "https://github.com/Abdull-g/dhakira/issues"
+  },
+  "license": "MIT",
+  "private": false,
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  },
+  "dependencies": {
+    "@tobilu/qmd": "^2.0.1",
+    "yaml": "^2.8.2"
+  }
+}

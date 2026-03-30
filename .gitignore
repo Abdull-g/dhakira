@@ -1,0 +1,28 @@
+node_modules/
+dist/
+*.tgz
+*.sqlite
+*.sqlite-journal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Test
+coverage/
+benchmark/
+docs/
+landing/
+scripts/
+CLAUDE.md
+CLI-BUILD-SPEC.md
