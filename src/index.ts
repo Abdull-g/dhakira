@@ -94,12 +94,15 @@ async function markFirstInjectionDone(walletDir: string): Promise<void> {
 
 /**
  * Parse the assistant's text content from a provider response body.
- * Handles both OpenAI and Anthropic response formats (non-streaming).
+ * Handles both non-streaming (single JSON) and streaming (SSE) formats
+ * for OpenAI and Anthropic providers.
  * Returns null if the response can't be parsed or has no text content.
  */
 function parseAssistantResponse(responseBody: Buffer, provider: string): string | null {
+  const text = responseBody.toString('utf8')
+
+  // --- Try non-streaming first (single JSON object) ---
   try {
-    const text = responseBody.toString('utf8')
     const json = JSON.parse(text) as Record<string, unknown>
 
     if (provider === 'anthropic') {
@@ -120,6 +123,49 @@ function parseAssistantResponse(responseBody: Buffer, provider: string): string 
       | undefined
     if (!msg || typeof msg.content !== 'string') return null
     return msg.content
+  } catch {
+    // JSON.parse failed — likely SSE streaming data. Fall through to SSE parser.
+  }
+
+  // --- SSE streaming fallback ---
+  // Streaming responses are multiple "data: {...}" lines.
+  // We extract text deltas from each line and concatenate them.
+  try {
+    const lines = text.split('\n')
+    const parts: string[] = []
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const payload = line.slice(6).trim()
+      if (payload === '[DONE]') break
+
+      let chunk: Record<string, unknown>
+      try {
+        chunk = JSON.parse(payload) as Record<string, unknown>
+      } catch {
+        continue // Skip unparseable lines
+      }
+
+      if (provider === 'anthropic') {
+        // Anthropic SSE: event types include content_block_delta with text_delta
+        const delta = chunk.delta as Record<string, unknown> | undefined
+        if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+          parts.push(delta.text)
+        }
+      } else {
+        // OpenAI SSE: choices[].delta.content
+        const choices = chunk.choices as Array<Record<string, unknown>> | undefined
+        if (choices?.[0]) {
+          const delta = choices[0].delta as Record<string, unknown> | undefined
+          if (delta && typeof delta.content === 'string') {
+            parts.push(delta.content)
+          }
+        }
+      }
+    }
+
+    const result = parts.join('')
+    return result.length > 0 ? result : null
   } catch {
     return null
   }
