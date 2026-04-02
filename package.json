@@ -1,6 +1,6 @@
 {
   "name": "dhakira",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Your AI, with memory. Local-first portable AI memory system.",
   "type": "module",
   "engines": {
