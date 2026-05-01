@@ -1,0 +1,406 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`baseline corpus replay (current v1 pipeline) > snapshots the current pipeline output for every corpus record 1`] = `
+[
+  {
+    "id": "8bf1b68f-c722-4a03-a57e-1efe511aa2dd",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/v1/messages",
+  },
+  {
+    "id": "c566894c-5f04-4110-8963-2609c931a9a2",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/v1/messages",
+  },
+  {
+    "id": "29d1f0b8-eda3-4e5f-ad34-327f581b61b1",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/v1/messages",
+  },
+  {
+    "id": "ad16fdc8-e908-48a3-a3bc-770338e78c2b",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "e612aec9-c7e7-45a0-b9b4-229e82f49475",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "cf7b6167-d244-4724-b248-b28d61af2c42",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/models?limit=1000",
+  },
+  {
+    "id": "9575ae80-4ec8-40a9-96b1-d05db9808fd1",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "3817ba21-57b8-4fee-bdbb-fefc7fc76ad6",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "41be40a6-4b46-4537-a7a9-9e726a9ccbf3",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "84983a43-9110-4477-a8af-b702660f86cb",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/models?limit=1000",
+  },
+  {
+    "id": "14f8f34f-0b7c-45ee-ac98-6954a1d4952e",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "61814e71-1870-4085-bc03-f656a9971c21",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "0d490126-73b4-4e09-8921-0fb477944daa",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/models?limit=1000",
+  },
+  {
+    "id": "ba9f95fc-9524-4dff-a41d-c6deb39d83bb",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "d75b2714-1d05-48e5-ad78-d05f61c7c4e1",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "cf86c2dc-fd93-45dc-886e-7094ffe1abd0",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "65cebf0c-3cab-4ba0-af4d-b719adffabcc",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "185ce8f1-67ef-4f08-9551-eb607e8b06f4",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/models?limit=1000",
+  },
+  {
+    "id": "1b1b5e7a-a29f-485b-a78f-b3186aff77d1",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "e9e423ff-397f-4906-86cf-df8c4b984bfd",
+    "pairCount": 1,
+    "pairs": [
+      {
+        "assistantContent": "",
+        "userContent": "<system-reminder>
+The following skills are available for use with the Skill tool:
+
+- update-config: Use this skill to configure the Claude Code harness via settings.json. Automated behaviors ("from now on when X", "each time X", "whenever X", "before/after X") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use for: permissions ("allow X", "add permission", "move permission to"), env vars ("set X=Y"), hook troubleshooting, or any changes to settings.json/settings.local.json files. Examples: "allow npm commands", "add bq permission to global settings", "move permission to user settings", "set DEBUG=true", "when claude stops show X". For simple settings like theme/model, suggest the /config command.
+- keybindings-help: Use when the user wants to customize keyboard shortcuts, rebind keys, add chord bindings, or modify ~/.claude/keybindings.json. Examples: "rebind ctrl+s", "add a chord shortcut", "change the submit key", "customize keybindings".
+- simplify: Review changed code for reuse, quality, and efficiency, then fix any issues found.
+- fewer-permission-prompts: Scan your transcripts for common read-only Bash and MCP tool calls, then add a prioritized allowlist to project .claude/settings.json to reduce permission prompts.
+- loop: Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace. - When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. "check the deploy every 5 minutes", "keep running /babysit-prs"). Do NOT invoke for one-off tasks.
+- schedule: Create, update, list, or run scheduled remote agents (routines) that execute on a cron schedule. - When the user wants to schedule a recurring remote agent, set up automated tasks, create a cron job for Claude Code, or manage their scheduled agents/routines. Also use when the user wants a one-time scheduled run ("run this once at 3pm", "remind me to check X tomorrow").
+- claude-api: Build, debug, and optimize Claude API / Anthropic SDK apps. Apps built with this skill should include prompt caching. Also handles migrating existing Claude API code between Claude model versions (4.5 → 4.6, 4.6 → 4.7, retired-model replacements).
+TRIGGER when: code imports \`anthropic\`/\`@anthropic-ai/sdk\`; user asks for the Claude API, Anthropic SDK, or Managed Agents; user adds/modifies/tunes a Claude feature (caching, thinking, compaction, tool use, batch, files, citations, memory) or model (Opus/Sonnet/Haiku) in a file; questions about prompt caching / cache hit rate in an Anthropic SDK project.
+SKIP: file imports \`openai\`/other-provider SDK, filename like \`*-openai.py\`/\`*-generic.py\`, provider-neutral code, general programming/ML.
+- init: Initialize a new CLAUDE.md file with codebase documentation
+- review: Review a pull request
+- security-review: Complete a security review of the pending changes on the current branch
+</system-reminder>
+<system-reminder>
+As you answer the user's questions, you can use the following context:
+# currentDate
+Today's date is 2026-05-01.
+
+      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
+</system-reminder>
+
+Read sample.js and tell me what it does in one line.",
+      },
+    ],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "58a64e00-add7-4aed-b278-7db8b751cb7c",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "e4c459aa-510d-4dfc-9451-6e9a09df0d65",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/models?limit=1000",
+  },
+  {
+    "id": "3b762347-48c0-4d68-a733-396771006418",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "2e27650c-f3e8-4ce4-abb3-2a62e13e2045",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "a344611b-5aab-40b4-9807-96ebfd9ab2be",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "da8e2efd-83f8-4b93-be31-b56afb6db321",
+    "pairCount": 1,
+    "pairs": [
+      {
+        "assistantContent": "Writing the file and running it.",
+        "userContent": "<system-reminder>
+The following skills are available for use with the Skill tool:
+
+- update-config: Use this skill to configure the Claude Code harness via settings.json. Automated behaviors ("from now on when X", "each time X", "whenever X", "before/after X") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use for: permissions ("allow X", "add permission", "move permission to"), env vars ("set X=Y"), hook troubleshooting, or any changes to settings.json/settings.local.json files. Examples: "allow npm commands", "add bq permission to global settings", "move permission to user settings", "set DEBUG=true", "when claude stops show X". For simple settings like theme/model, suggest the /config command.
+- keybindings-help: Use when the user wants to customize keyboard shortcuts, rebind keys, add chord bindings, or modify ~/.claude/keybindings.json. Examples: "rebind ctrl+s", "add a chord shortcut", "change the submit key", "customize keybindings".
+- simplify: Review changed code for reuse, quality, and efficiency, then fix any issues found.
+- fewer-permission-prompts: Scan your transcripts for common read-only Bash and MCP tool calls, then add a prioritized allowlist to project .claude/settings.json to reduce permission prompts.
+- loop: Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace. - When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. "check the deploy every 5 minutes", "keep running /babysit-prs"). Do NOT invoke for one-off tasks.
+- schedule: Create, update, list, or run scheduled remote agents (routines) that execute on a cron schedule. - When the user wants to schedule a recurring remote agent, set up automated tasks, create a cron job for Claude Code, or manage their scheduled agents/routines. Also use when the user wants a one-time scheduled run ("run this once at 3pm", "remind me to check X tomorrow").
+- claude-api: Build, debug, and optimize Claude API / Anthropic SDK apps. Apps built with this skill should include prompt caching. Also handles migrating existing Claude API code between Claude model versions (4.5 → 4.6, 4.6 → 4.7, retired-model replacements).
+TRIGGER when: code imports \`anthropic\`/\`@anthropic-ai/sdk\`; user asks for the Claude API, Anthropic SDK, or Managed Agents; user adds/modifies/tunes a Claude feature (caching, thinking, compaction, tool use, batch, files, citations, memory) or model (Opus/Sonnet/Haiku) in a file; questions about prompt caching / cache hit rate in an Anthropic SDK project.
+SKIP: file imports \`openai\`/other-provider SDK, filename like \`*-openai.py\`/\`*-generic.py\`, provider-neutral code, general programming/ML.
+- init: Initialize a new CLAUDE.md file with codebase documentation
+- review: Review a pull request
+- security-review: Complete a security review of the pending changes on the current branch
+</system-reminder>
+<system-reminder>
+As you answer the user's questions, you can use the following context:
+# currentDate
+Today's date is 2026-05-01.
+
+      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
+</system-reminder>
+
+Create a file called greet.js that prints 'hello from dhakira', then run it with node, and tell me what it printed.",
+      },
+    ],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "e5b25308-b117-49db-84d7-9f337538db9e",
+    "pairCount": 2,
+    "pairs": [
+      {
+        "assistantContent": "Writing the file and running it.",
+        "userContent": "<system-reminder>
+The following skills are available for use with the Skill tool:
+
+- update-config: Use this skill to configure the Claude Code harness via settings.json. Automated behaviors ("from now on when X", "each time X", "whenever X", "before/after X") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use for: permissions ("allow X", "add permission", "move permission to"), env vars ("set X=Y"), hook troubleshooting, or any changes to settings.json/settings.local.json files. Examples: "allow npm commands", "add bq permission to global settings", "move permission to user settings", "set DEBUG=true", "when claude stops show X". For simple settings like theme/model, suggest the /config command.
+- keybindings-help: Use when the user wants to customize keyboard shortcuts, rebind keys, add chord bindings, or modify ~/.claude/keybindings.json. Examples: "rebind ctrl+s", "add a chord shortcut", "change the submit key", "customize keybindings".
+- simplify: Review changed code for reuse, quality, and efficiency, then fix any issues found.
+- fewer-permission-prompts: Scan your transcripts for common read-only Bash and MCP tool calls, then add a prioritized allowlist to project .claude/settings.json to reduce permission prompts.
+- loop: Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace. - When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. "check the deploy every 5 minutes", "keep running /babysit-prs"). Do NOT invoke for one-off tasks.
+- schedule: Create, update, list, or run scheduled remote agents (routines) that execute on a cron schedule. - When the user wants to schedule a recurring remote agent, set up automated tasks, create a cron job for Claude Code, or manage their scheduled agents/routines. Also use when the user wants a one-time scheduled run ("run this once at 3pm", "remind me to check X tomorrow").
+- claude-api: Build, debug, and optimize Claude API / Anthropic SDK apps. Apps built with this skill should include prompt caching. Also handles migrating existing Claude API code between Claude model versions (4.5 → 4.6, 4.6 → 4.7, retired-model replacements).
+TRIGGER when: code imports \`anthropic\`/\`@anthropic-ai/sdk\`; user asks for the Claude API, Anthropic SDK, or Managed Agents; user adds/modifies/tunes a Claude feature (caching, thinking, compaction, tool use, batch, files, citations, memory) or model (Opus/Sonnet/Haiku) in a file; questions about prompt caching / cache hit rate in an Anthropic SDK project.
+SKIP: file imports \`openai\`/other-provider SDK, filename like \`*-openai.py\`/\`*-generic.py\`, provider-neutral code, general programming/ML.
+- init: Initialize a new CLAUDE.md file with codebase documentation
+- review: Review a pull request
+- security-review: Complete a security review of the pending changes on the current branch
+</system-reminder>
+<system-reminder>
+As you answer the user's questions, you can use the following context:
+# currentDate
+Today's date is 2026-05-01.
+
+      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
+</system-reminder>
+
+Create a file called greet.js that prints 'hello from dhakira', then run it with node, and tell me what it printed.",
+      },
+      {
+        "assistantContent": "",
+        "userContent": "",
+      },
+    ],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "39dc074b-e254-4cfa-86cf-6abe133da710",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "f3cde02c-c883-4013-b181-a86982f7322e",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/models?limit=1000",
+  },
+  {
+    "id": "300d5b84-6d74-4e6c-8a3f-a7dea6dd9a10",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "ebc7c7c0-70e7-441f-a690-c62e4c922241",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "2d18aadb-2b8b-4a0b-9277-a4e2aeb76ff1",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/models?limit=1000",
+  },
+  {
+    "id": "7af6adc2-5540-47a4-a272-0fc76354ec8b",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "8758ea40-7c68-47aa-98ed-e9dbae7659df",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "76629abe-6e54-45ea-b5c6-8895881fc48c",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "1e84d15d-c569-4eb0-ab4b-919bef244751",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 401,
+    "url": "/",
+  },
+  {
+    "id": "fa4125d8-5fea-4ee9-a136-b24a3ae6e05b",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/models?limit=1000",
+  },
+  {
+    "id": "7606d71b-14a5-48fc-9937-1df8c3d2e4bf",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "3d6399f3-099c-481f-8873-53ed1d1cfd26",
+    "pairCount": 0,
+    "pairs": [],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+  {
+    "id": "4ef08421-e9b3-418a-8c18-7db5fe222244",
+    "pairCount": 1,
+    "pairs": [
+      {
+        "assistantContent": "",
+        "userContent": "<system-reminder>
+The following skills are available for use with the Skill tool:
+
+- update-config: Use this skill to configure the Claude Code harness via settings.json. Automated behaviors ("from now on when X", "each time X", "whenever X", "before/after X") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use for: permissions ("allow X", "add permission", "move permission to"), env vars ("set X=Y"), hook troubleshooting, or any changes to settings.json/settings.local.json files. Examples: "allow npm commands", "add bq permission to global settings", "move permission to user settings", "set DEBUG=true", "when claude stops show X". For simple settings like theme/model, suggest the /config command.
+- keybindings-help: Use when the user wants to customize keyboard shortcuts, rebind keys, add chord bindings, or modify ~/.claude/keybindings.json. Examples: "rebind ctrl+s", "add a chord shortcut", "change the submit key", "customize keybindings".
+- simplify: Review changed code for reuse, quality, and efficiency, then fix any issues found.
+- fewer-permission-prompts: Scan your transcripts for common read-only Bash and MCP tool calls, then add a prioritized allowlist to project .claude/settings.json to reduce permission prompts.
+- loop: Run a prompt or slash command on a recurring interval (e.g. /loop 5m /foo). Omit the interval to let the model self-pace. - When the user wants to set up a recurring task, poll for status, or run something repeatedly on an interval (e.g. "check the deploy every 5 minutes", "keep running /babysit-prs"). Do NOT invoke for one-off tasks.
+- schedule: Create, update, list, or run scheduled remote agents (routines) that execute on a cron schedule. - When the user wants to schedule a recurring remote agent, set up automated tasks, create a cron job for Claude Code, or manage their scheduled agents/routines. Also use when the user wants a one-time scheduled run ("run this once at 3pm", "remind me to check X tomorrow").
+- claude-api: Build, debug, and optimize Claude API / Anthropic SDK apps. Apps built with this skill should include prompt caching. Also handles migrating existing Claude API code between Claude model versions (4.5 → 4.6, 4.6 → 4.7, retired-model replacements).
+TRIGGER when: code imports \`anthropic\`/\`@anthropic-ai/sdk\`; user asks for the Claude API, Anthropic SDK, or Managed Agents; user adds/modifies/tunes a Claude feature (caching, thinking, compaction, tool use, batch, files, citations, memory) or model (Opus/Sonnet/Haiku) in a file; questions about prompt caching / cache hit rate in an Anthropic SDK project.
+SKIP: file imports \`openai\`/other-provider SDK, filename like \`*-openai.py\`/\`*-generic.py\`, provider-neutral code, general programming/ML.
+- init: Initialize a new CLAUDE.md file with codebase documentation
+- review: Review a pull request
+- security-review: Complete a security review of the pending changes on the current branch
+</system-reminder>
+<system-reminder>
+As you answer the user's questions, you can use the following context:
+# currentDate
+Today's date is 2026-05-01.
+
+      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.
+</system-reminder>
+
+Run 'uname -a' and summarize the output in one sentence.",
+      },
+    ],
+    "status": 200,
+    "url": "/v1/messages?beta=true",
+  },
+]
+`;
