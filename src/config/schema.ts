@@ -16,6 +16,13 @@ export interface WalletConfig {
 
   tools: ToolConfig[]
 
+  capture: {
+    /** Capture pipeline implementation to use */
+    pipelineVersion: 'v1' | 'v2'
+    /** Enable verbose capture-stage diagnostics */
+    debug: boolean
+  }
+
   extraction: {
     /** Cron expression for extraction schedule */
     schedule: string

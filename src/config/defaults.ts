@@ -20,6 +20,11 @@ export function getDefaults(): WalletConfig {
 
     tools: [],
 
+    capture: {
+      pipelineVersion: 'v1',
+      debug: false,
+    },
+
     extraction: {
       schedule: '0 2 * * *',
       model: 'gpt-4o-mini',

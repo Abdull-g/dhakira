@@ -22,6 +22,7 @@ const BASE_CONFIG: WalletConfig = {
       baseUrl: 'https://api.anthropic.com/v1',
     },
   ],
+  capture: { pipelineVersion: 'v1', debug: false },
   extraction: {
     schedule: '0 2 * * *',
     model: 'gpt-4o-mini',

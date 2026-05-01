@@ -3,6 +3,8 @@
 
 import { access, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { classifyConversation } from './capture/classifier.js'
+import { ingestAnthropicTrace } from './capture/ingest.js'
 import { storeTurnPairsWithContent } from './capture/turns.js'
 import type { CapturedConversation } from './capture/types.js'
 import { writeConversation } from './capture/writer.js'
@@ -253,6 +255,19 @@ export async function main(): Promise<void> {
     },
 
     captureConversation: (normalized, responseBody) => {
+      if (config.capture.pipelineVersion === 'v2' && normalized.provider === 'anthropic') {
+        const traceResult = ingestAnthropicTrace({
+          requestBody: normalized.rawBody,
+          responseBody,
+          sourceTool: normalized.tool,
+        })
+
+        if (traceResult.ok) {
+          const classification = classifyConversation(traceResult.value)
+          if (!classification.keep) return
+        }
+      }
+
       const messages =
         normalized.systemPrompt !== null
           ? [{ role: 'system' as const, content: normalized.systemPrompt }, ...normalized.messages]

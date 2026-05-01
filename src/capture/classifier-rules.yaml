@@ -1,0 +1,18 @@
+title_generation:
+  - id: claude-code-haiku-title
+    require_all:
+      system_prompt_contains_all:
+        - "Generate a concise"
+        - "title"
+      model_includes: "haiku"
+  - id: single-title-field-prompt
+    require_all:
+      system_prompt_contains_all:
+        - "Return JSON with a single \"title\" field"
+
+summarization:
+  - id: summarize-following
+    require_all:
+      system_prompt_contains_any:
+        - "summarize the following"
+        - "compress the following conversation"

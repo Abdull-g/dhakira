@@ -22,6 +22,9 @@ tools:
     provider: openai
     apiKey: sk-literal-key
     baseUrl: https://api.openai.com/v1
+capture:
+  pipelineVersion: v2
+  debug: true
 extraction:
   schedule: "0 3 * * *"
   model: gpt-4o
@@ -93,6 +96,15 @@ describe('loadConfig', () => {
       expect(result.value.injection.minRelevanceScore).toBe(0.5)
       expect(result.value.injection.recencyBoost).toBe(0.2)
       expect(result.value.injection.maxTurns).toBe(6)
+    })
+
+    it('should parse capture settings', async () => {
+      vi.mocked(fsMock.readFile).mockResolvedValue(VALID_YAML as never)
+      const result = await loadConfig()
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.value.capture.pipelineVersion).toBe('v2')
+      expect(result.value.capture.debug).toBe(true)
     })
 
     it('should parse incognito flag', async () => {
@@ -218,6 +230,15 @@ tools:
       expect(result.value.injection.minRelevanceScore).toBe(0.3)
       expect(result.value.injection.recencyBoost).toBe(0.3)
       expect(result.value.injection.maxTurns).toBe(8)
+    })
+
+    it('should default existing configs without capture settings to v1', async () => {
+      vi.mocked(fsMock.readFile).mockResolvedValue('incognito: true\n' as never)
+      const result = await loadConfig()
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.value.capture.pipelineVersion).toBe('v1')
+      expect(result.value.capture.debug).toBe(false)
     })
 
     it('should fall back to defaults for unrecognised injection fields', async () => {

@@ -75,6 +75,7 @@ function mergeWithDefaults(raw: unknown): WalletConfig {
 
   const proxyRaw = isRecord(raw.proxy) ? raw.proxy : {}
   const dashRaw = isRecord(raw.dashboard) ? raw.dashboard : {}
+  const captureRaw = isRecord(raw.capture) ? raw.capture : {}
   const extractionRaw = isRecord(raw.extraction) ? raw.extraction : {}
   const injectionRaw = isRecord(raw.injection) ? raw.injection : {}
 
@@ -91,6 +92,10 @@ function mergeWithDefaults(raw: unknown): WalletConfig {
       host: getString(dashRaw.host, d.dashboard.host),
     },
     tools: parseTools(raw.tools),
+    capture: {
+      pipelineVersion: captureRaw.pipelineVersion === 'v2' ? 'v2' : 'v1',
+      debug: getBoolean(captureRaw.debug, d.capture.debug),
+    },
     extraction: {
       schedule: getString(extractionRaw.schedule, d.extraction.schedule),
       model: getString(extractionRaw.model, d.extraction.model),

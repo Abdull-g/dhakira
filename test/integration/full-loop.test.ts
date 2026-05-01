@@ -44,6 +44,7 @@ function makeConfig(upstreamPort: number, walletDir: string): WalletConfig {
         baseUrl: `http://127.0.0.1:${upstreamPort}`,
       },
     ],
+    capture: { pipelineVersion: 'v1', debug: false },
     extraction: {
       schedule: '0 2 * * *',
       model: 'gpt-4o-mini',
