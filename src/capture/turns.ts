@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { NormalizedMessage, Result } from '../proxy/types.js'
 import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
+import type { ContentBlock, TraceMessage, TraceRole } from './ingest.js'
 import { redactSecrets } from './secrets.js'
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,25 @@ export interface TurnPair {
   /** SHA-256 fingerprint of the tool's system prompt (first 12 hex chars).
    *  "default" when no system prompt was present. Used to boost same-project turns. */
   contextFingerprint: string
+  /** Non-searchable capture metadata for tool-aware extraction. */
+  metadata?: {
+    toolsUsed: string[]
+  }
+}
+
+type ExtractionState = 'awaiting_user' | 'awaiting_assistant' | 'awaiting_tool_result'
+
+interface ExtractionContext {
+  pairs: TurnPair[]
+  turnIndex: number
+  state: ExtractionState
+  pendingUser: string
+  assistantParts: string[]
+  toolsUsed: Set<string>
+  tool: string
+  sessionId: string
+  timestamp: Date
+  contextFingerprint: string
 }
 
 // ---------------------------------------------------------------------------
@@ -38,57 +58,182 @@ export interface TurnPair {
 /**
  * Extract turn pairs from a list of normalized messages.
  *
- * Rules:
- * - System messages are skipped (they are not conversation turns).
- * - Pairs consecutive user + assistant messages (user comes first).
- * - If a user message has no following assistant message it is dropped
- *   (partial turn — not enough context to be useful).
- * - Secrets are redacted from both sides of each pair before returning.
+ * Walks the conversation with a small state machine so assistant tool-use
+ * roundtrips are stitched into one searchable user → assistant pair.
  */
 export function extractTurnPairs(
-  messages: NormalizedMessage[],
+  messages: Array<NormalizedMessage | TraceMessage>,
   tool: string,
   sessionId: string,
   timestamp: Date,
   contextFingerprint = 'default',
 ): TurnPair[] {
-  const conversationMessages = messages.filter((m) => m.role !== 'system')
-
-  const pairs: TurnPair[] = []
-  let turnIndex = 0
-  let i = 0
-
-  while (i < conversationMessages.length) {
-    const msg = conversationMessages[i]
-
-    if (msg.role === 'user') {
-      const next = conversationMessages[i + 1]
-      if (next?.role === 'assistant') {
-        const { cleaned: userContent } = redactSecrets(msg.content)
-        const { cleaned: assistantContent } = redactSecrets(next.content)
-
-        pairs.push({
-          id: generateId('turn'),
-          userContent,
-          assistantContent,
-          timestamp: timestamp.toISOString(),
-          tool,
-          sessionId,
-          turnIndex,
-          contextFingerprint,
-        })
-
-        turnIndex++
-        i += 2
-        continue
-      }
-    }
-
-    // Skip non-user messages and orphaned user messages
-    i++
+  const context: ExtractionContext = {
+    pairs: [],
+    turnIndex: 0,
+    state: 'awaiting_user',
+    pendingUser: '',
+    assistantParts: [],
+    toolsUsed: new Set<string>(),
+    tool,
+    sessionId,
+    timestamp,
+    contextFingerprint,
   }
 
-  return pairs
+  for (const message of messages) {
+    advanceExtraction(context, message)
+  }
+
+  return context.pairs
+}
+
+function advanceExtraction(
+  context: ExtractionContext,
+  message: NormalizedMessage | TraceMessage,
+): void {
+  const role = getRole(message)
+  if (role === 'system') return
+
+  if (context.state === 'awaiting_user') {
+    beginUserIfPresent(context, message)
+    return
+  }
+
+  if (context.state === 'awaiting_assistant') {
+    handleAwaitingAssistant(context, message)
+    return
+  }
+
+  handleAwaitingToolResult(context, message)
+}
+
+function beginUserIfPresent(
+  context: ExtractionContext,
+  message: NormalizedMessage | TraceMessage,
+): void {
+  if (getRole(message) === 'user' && !isToolResultMessage(message)) {
+    resetForUser(context, getText(message))
+  }
+}
+
+function handleAwaitingAssistant(
+  context: ExtractionContext,
+  message: NormalizedMessage | TraceMessage,
+): void {
+  if (getRole(message) === 'user' && !isToolResultMessage(message)) {
+    resetForUser(context, getText(message))
+    return
+  }
+
+  if (getRole(message) !== 'assistant') return
+  appendAssistant(message, context.assistantParts, context.toolsUsed)
+  if (hasToolUse(message)) {
+    context.state = 'awaiting_tool_result'
+    return
+  }
+  emitPair(context)
+  reset(context)
+}
+
+function handleAwaitingToolResult(
+  context: ExtractionContext,
+  message: NormalizedMessage | TraceMessage,
+): void {
+  if (isToolResultMessage(message)) {
+    context.state = 'awaiting_assistant'
+    return
+  }
+
+  if (getRole(message) === 'assistant') {
+    appendAssistant(message, context.assistantParts, context.toolsUsed)
+    if (!hasToolUse(message)) {
+      emitPair(context)
+      reset(context)
+    }
+    return
+  }
+
+  beginUserIfPresent(context, message)
+}
+
+function resetForUser(context: ExtractionContext, userContent: string): void {
+  context.pendingUser = userContent
+  context.assistantParts = []
+  context.toolsUsed = new Set<string>()
+  context.state = userContent.trim().length > 0 ? 'awaiting_assistant' : 'awaiting_user'
+}
+
+function emitPair(context: ExtractionContext): void {
+  const userContent = redactSecrets(context.pendingUser).cleaned
+  const assistantContent = redactSecrets(context.assistantParts.join('\n')).cleaned
+  if (userContent.trim().length === 0 || assistantContent.trim().length === 0) return
+
+  context.pairs.push({
+    id: generateId('turn'),
+    userContent,
+    assistantContent,
+    timestamp: context.timestamp.toISOString(),
+    tool: context.tool,
+    sessionId: context.sessionId,
+    turnIndex: context.turnIndex,
+    contextFingerprint: context.contextFingerprint,
+    metadata: { toolsUsed: [...context.toolsUsed] },
+  })
+
+  context.turnIndex++
+}
+
+function reset(context: ExtractionContext): void {
+  context.pendingUser = ''
+  context.assistantParts = []
+  context.toolsUsed = new Set<string>()
+  context.state = 'awaiting_user'
+}
+
+function getRole(message: NormalizedMessage | TraceMessage): NormalizedMessage['role'] | TraceRole {
+  return message.role
+}
+
+function getText(message: NormalizedMessage | TraceMessage): string {
+  if (typeof message.content === 'string') return message.content
+  return message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
+}
+
+function hasToolUse(message: NormalizedMessage | TraceMessage): boolean {
+  return (
+    Array.isArray(message.content) && message.content.some((block) => block.type === 'tool_use')
+  )
+}
+
+function isToolResultMessage(message: NormalizedMessage | TraceMessage): boolean {
+  if (message.role === 'tool') return true
+  return (
+    Array.isArray(message.content) &&
+    message.content.length > 0 &&
+    message.content.every((block) => block.type === 'tool_result')
+  )
+}
+
+function appendAssistant(
+  message: NormalizedMessage | TraceMessage,
+  assistantParts: string[],
+  toolsUsed: Set<string>,
+): void {
+  const text = getText(message)
+  if (text.trim().length > 0) assistantParts.push(text)
+
+  if (Array.isArray(message.content)) {
+    for (const block of message.content) {
+      addToolName(block, toolsUsed)
+    }
+  }
+}
+
+function addToolName(block: ContentBlock, toolsUsed: Set<string>): void {
+  if (block.type === 'tool_use' && block.name.length > 0) {
+    toolsUsed.add(block.name)
+  }
 }
 
 // ---------------------------------------------------------------------------
