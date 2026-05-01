@@ -23,6 +23,7 @@ export interface ConversationTrace {
   model: string
   maxTokens: number
   streamResponse: boolean
+  sanitizerRemovedAll?: boolean
   rawRequest: unknown
   rawResponse: unknown
   sourceTool: string

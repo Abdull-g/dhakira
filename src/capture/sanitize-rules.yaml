@@ -1,0 +1,5 @@
+rules:
+  - id: claude-code-system-reminder
+    scope: user
+    action: remove
+    pattern: "<system-reminder>[\\s\\S]*?</system-reminder>"
