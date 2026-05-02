@@ -1,8 +1,15 @@
 # Dhakira
 
+[![npm version](https://img.shields.io/npm/v/dhakira.svg?color=0366d6)](https://www.npmjs.com/package/dhakira)
+[![npm downloads](https://img.shields.io/npm/dm/dhakira.svg?color=0366d6)](https://www.npmjs.com/package/dhakira)
+[![license](https://img.shields.io/npm/l/dhakira.svg?color=0366d6)](LICENSE)
+[![node](https://img.shields.io/node/v/dhakira.svg?color=0366d6)](package.json)
+
 **Your AI, with memory.**
 
 Every AI session starts from zero. Dhakira changes that.
+
+> **What's new in v0.2:** A new multi-stage capture pipeline (classifier → sanitizer → extractor → quality gate) produces clean, per-turn memories with zero provider boilerplate. See the [changelog](CHANGELOG.md) for details.
 
 Dhakira is a local proxy that sits between your AI tools and their APIs. It captures your conversations, learns from them, and quietly injects relevant context into future sessions — so every tool you use already knows you.
 
@@ -277,7 +284,7 @@ Search takes 50-400ms depending on your wallet size. The first request after sta
 Your tool gets "connection refused" on localhost:4100 and won't work until you either restart Dhakira or point your tool back at the original API.
 
 **Can I use this with Cursor?**
-Not yet. Cursor routes API calls through its own servers, so the proxy can't intercept them. MCP support is on the roadmap — that would unlock Cursor, Windsurf, and other cloud-routed tools.
+Not directly. Cursor routes API calls through its own servers, so the local proxy can't intercept them unless you use Cursor's BYOK mode with a custom base URL pointed at Dhakira. Tools that let you set a raw API endpoint (Claude Code, aider, Continue, Open Interpreter) work out of the box.
 
 **How is this different from Claude's built-in memory?**
 Claude's memory only works within Claude. Dhakira works across every tool that supports custom API endpoints — your memory follows you from Claude Code to aider to whatever you use next. Platform memory is locked in. Yours shouldn't be.
