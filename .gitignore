@@ -20,15 +20,9 @@ Thumbs.db
 
 # Test
 coverage/
+
+# Local-only directories
 benchmark/
 docs/
 landing/
 scripts/
-
-# Internal engineering notes (never publish)
-CLAUDE.md
-CLI-BUILD-SPEC.md
-DHAKIRA-V2-*.md
-DHAKIRA-V*-*.md
-CURSOR-*.md
-RELEASE_NOTES_*.md
