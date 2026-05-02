@@ -24,6 +24,7 @@ export interface ConversationTrace {
   maxTokens: number
   streamResponse: boolean
   sanitizerRemovedAll?: boolean
+  responseMessageIndex?: number
   rawRequest: unknown
   rawResponse: unknown
   sourceTool: string
@@ -32,7 +33,17 @@ export interface ConversationTrace {
 export interface IngestInput {
   requestBody: unknown
   responseBody: Buffer | string | null
+  responseSseEvents?: unknown[] | null
   sourceTool: string
+}
+
+interface SseContentBuilder {
+  type: string
+  text: string
+  thinking: string
+  id: string
+  name: string
+  inputJson: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -139,6 +150,81 @@ function normalizeResponseMessage(rawResponse: unknown): TraceMessage | null {
   return { role: 'assistant', content: normalizeContentBlocks(content) }
 }
 
+export function coalesceAnthropicSseEvents(events: unknown[]): Record<string, unknown> {
+  const builders = new Map<number, SseContentBuilder>()
+  for (const event of events) {
+    if (!isRecord(event)) continue
+    if (event.type === 'content_block_start') startContentBlock(builders, event)
+    if (event.type === 'content_block_delta') appendContentDelta(builders, event)
+  }
+
+  return {
+    role: 'assistant',
+    content: [...builders.entries()]
+      .sort(([a], [b]) => a - b)
+      .flatMap(([, builder]) => buildContentBlock(builder)),
+  }
+}
+
+function startContentBlock(
+  builders: Map<number, SseContentBuilder>,
+  event: Record<string, unknown>,
+): void {
+  if (typeof event.index !== 'number' || !isRecord(event.content_block)) return
+  const block = event.content_block
+  builders.set(event.index, {
+    type: typeof block.type === 'string' ? block.type : 'unknown',
+    text: typeof block.text === 'string' ? block.text : '',
+    thinking: typeof block.thinking === 'string' ? block.thinking : '',
+    id: typeof block.id === 'string' ? block.id : '',
+    name: typeof block.name === 'string' ? block.name : '',
+    inputJson: '',
+  })
+}
+
+function appendContentDelta(
+  builders: Map<number, SseContentBuilder>,
+  event: Record<string, unknown>,
+): void {
+  if (typeof event.index !== 'number' || !isRecord(event.delta)) return
+  const builder = builders.get(event.index)
+  if (builder === undefined) return
+
+  const delta = event.delta
+  if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+    builder.text += delta.text
+  }
+  if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+    builder.thinking += delta.thinking
+  }
+  if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+    builder.inputJson += delta.partial_json
+  }
+}
+
+function buildContentBlock(builder: SseContentBuilder): ContentBlock[] {
+  if (builder.type === 'text') return [{ type: 'text', text: builder.text }]
+  if (builder.type === 'thinking') return [{ type: 'thinking', thinking: builder.thinking }]
+  if (builder.type !== 'tool_use') return []
+  return [
+    {
+      type: 'tool_use',
+      id: builder.id,
+      name: builder.name,
+      input: parseToolInput(builder.inputJson),
+    },
+  ]
+}
+
+function parseToolInput(inputJson: string): unknown {
+  if (inputJson.trim().length === 0) return {}
+  try {
+    return JSON.parse(inputJson) as unknown
+  } catch {
+    return inputJson
+  }
+}
+
 export function ingestAnthropicTrace(input: IngestInput): Result<ConversationTrace> {
   const request = input.requestBody
   if (!isRecord(request)) {
@@ -153,22 +239,26 @@ export function ingestAnthropicTrace(input: IngestInput): Result<ConversationTra
   }
 
   const system = normalizeSystem(request.system)
-  const rawResponse = parseRawResponse(input.responseBody)
+  const rawResponse = Array.isArray(input.responseSseEvents)
+    ? coalesceAnthropicSseEvents(input.responseSseEvents)
+    : parseRawResponse(input.responseBody)
   const responseMessage = normalizeResponseMessage(rawResponse)
   const requestMessages = normalizeRequestMessages(request.messages)
+  const messages =
+    responseMessage === null
+      ? [...system.messages, ...requestMessages]
+      : [...system.messages, ...requestMessages, responseMessage]
 
   return {
     ok: true,
     value: {
-      messages:
-        responseMessage === null
-          ? [...system.messages, ...requestMessages]
-          : [...system.messages, ...requestMessages, responseMessage],
+      messages,
       systemPromptHash: hashSystemPrompt(system.prompt),
       systemPrompt: system.prompt,
       model: request.model,
       maxTokens: typeof request.max_tokens === 'number' ? request.max_tokens : 0,
       streamResponse: request.stream === true,
+      responseMessageIndex: responseMessage === null ? undefined : messages.length - 1,
       rawRequest: request,
       rawResponse,
       sourceTool: input.sourceTool,

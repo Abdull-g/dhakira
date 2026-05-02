@@ -9,10 +9,13 @@ interface CorpusRecord {
   url: string
   reqBody: unknown
   respBodyRaw: string
+  respBodyText?: string
+  respSseEvents?: unknown[] | null
   respStatus: number
 }
 
 const CORPUS_PATH = join(process.cwd(), 'test/corpus/claude-code-baseline-v1.jsonl')
+const V2_CORPUS_PATH = join(process.cwd(), 'test/corpus/claude-code-baseline-v2.jsonl')
 const RULES_PATH = join(process.cwd(), 'src/capture/classifier-rules.yaml')
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -21,6 +24,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 async function loadCorpus(): Promise<CorpusRecord[]> {
   const raw = await readFile(CORPUS_PATH, 'utf8')
+  return raw
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as CorpusRecord)
+}
+
+async function loadV2Corpus(): Promise<CorpusRecord[]> {
+  const raw = await readFile(V2_CORPUS_PATH, 'utf8')
   return raw
     .trim()
     .split('\n')
@@ -70,7 +82,11 @@ async function classifyRecord(
   const rules = parseClassifierRulesYaml(await readFile(RULES_PATH, 'utf8'))
   const trace = ingestAnthropicTrace({
     requestBody: record.reqBody,
-    responseBody: Buffer.from(record.respBodyRaw, 'utf8'),
+    responseBody:
+      record.respBodyText !== undefined
+        ? record.respBodyText
+        : Buffer.from(record.respBodyRaw, 'utf8'),
+    responseSseEvents: record.respSseEvents,
     sourceTool: 'claude-code',
   })
   if (!trace.ok) throw trace.error
@@ -127,8 +143,29 @@ describe('classifyConversation', () => {
 
     expect(classifiedTitleIds).toEqual(expectedTitleIds)
   })
+
+  it('classifies v2 tool-use response calls as tool_intermediate', async () => {
+    const records = (await loadV2Corpus()).filter(hasAssistantResponseToolUse)
+    expect(records.map((record) => record.id).sort()).toEqual(
+      [
+        'bdad81ef-0375-4c8f-b729-566c7407960c',
+        'ba034895-74c1-42e2-8abf-dcb7b0d2e4b8',
+        'cad36056-1ada-4c78-bc1d-f72e896c18e9',
+        'dbb0fff2-939b-4ea1-9cdb-00f71377a144',
+      ].sort(),
+    )
+
+    const classifications = await Promise.all(records.map(classifyRecord))
+
+    expect(classifications.every((item) => item.category === 'tool_intermediate')).toBe(true)
+    expect(classifications.every((item) => item.keep === false)).toBe(true)
+  })
 })
 
 function hasMessagesRecord(record: CorpusRecord): boolean {
   return hasMessages(record.reqBody)
+}
+
+function hasAssistantResponseToolUse(record: CorpusRecord): boolean {
+  return JSON.stringify(record.respSseEvents ?? []).includes('"type":"tool_use"')
 }

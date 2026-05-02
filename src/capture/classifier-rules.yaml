@@ -16,3 +16,8 @@ summarization:
       system_prompt_contains_any:
         - "summarize the following"
         - "compress the following conversation"
+
+tool_intermediate:
+  - id: assistant-response-has-tool-use
+    require_all:
+      assistant_response_has_tool_use: true

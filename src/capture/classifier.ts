@@ -5,6 +5,7 @@ export type CaptureCategory =
   | 'real_conversation'
   | 'title_generation'
   | 'summarization'
+  | 'tool_intermediate'
   | 'tool_only_roundtrip'
   | 'pre_flight'
   | 'error_response'
@@ -23,6 +24,7 @@ export interface RuleConditions {
   max_tokens_lte?: number
   response_json_keys_only?: string[]
   response_matches_regex?: string
+  assistant_response_has_tool_use?: boolean
 }
 
 export interface ClassifierRule {
@@ -59,11 +61,20 @@ export const DEFAULT_CLASSIFIER_RULES: ClassifierRules = {
       },
     },
   ],
+  tool_intermediate: [
+    {
+      id: 'assistant-response-has-tool-use',
+      require_all: {
+        assistant_response_has_tool_use: true,
+      },
+    },
+  ],
 }
 
 const SKIP_CATEGORIES = new Set<CaptureCategory>([
   'title_generation',
   'summarization',
+  'tool_intermediate',
   'pre_flight',
 ])
 
@@ -97,6 +108,10 @@ function normalizeConditions(raw: Record<string, unknown>): RuleConditions {
     response_json_keys_only: stringArray(raw.response_json_keys_only),
     response_matches_regex:
       typeof raw.response_matches_regex === 'string' ? raw.response_matches_regex : undefined,
+    assistant_response_has_tool_use:
+      typeof raw.assistant_response_has_tool_use === 'boolean'
+        ? raw.assistant_response_has_tool_use
+        : undefined,
   }
 }
 
@@ -111,6 +126,7 @@ function isCaptureCategory(value: string): value is CaptureCategory {
     value === 'real_conversation' ||
     value === 'title_generation' ||
     value === 'summarization' ||
+    value === 'tool_intermediate' ||
     value === 'tool_only_roundtrip' ||
     value === 'pre_flight' ||
     value === 'error_response'
@@ -128,6 +144,7 @@ export function classifyConversation(
   const configuredCategories: CaptureCategory[] = [
     'title_generation',
     'summarization',
+    'tool_intermediate',
     'tool_only_roundtrip',
     'error_response',
   ]
@@ -215,6 +232,13 @@ function matchesRule(trace: ConversationTrace, rule: ClassifierRule): boolean {
     return false
   }
 
+  if (
+    conditions.assistant_response_has_tool_use !== undefined &&
+    responseHasToolUse(trace) !== conditions.assistant_response_has_tool_use
+  ) {
+    return false
+  }
+
   return true
 }
 
@@ -232,13 +256,25 @@ function responseText(rawResponse: unknown): string {
 }
 
 function isToolOnlyRoundtrip(trace: ConversationTrace): boolean {
-  const last = [...trace.messages].reverse().find((message) => message.role === 'assistant')
+  const last = getResponseMessage(trace)
   if (last === undefined || last.content.length === 0) return false
   const hasText = last.content.some(
     (block) => block.type === 'text' && block.text.trim().length > 0,
   )
   const hasToolUse = last.content.some((block) => block.type === 'tool_use')
   return hasToolUse && !hasText
+}
+
+function responseHasToolUse(trace: ConversationTrace): boolean {
+  const last = getResponseMessage(trace)
+  return last?.content.some((block) => block.type === 'tool_use') ?? false
+}
+
+function getResponseMessage(
+  trace: ConversationTrace,
+): ConversationTrace['messages'][number] | undefined {
+  if (trace.responseMessageIndex === undefined) return undefined
+  return trace.messages[trace.responseMessageIndex]
 }
 
 function isErrorResponse(trace: ConversationTrace): boolean {

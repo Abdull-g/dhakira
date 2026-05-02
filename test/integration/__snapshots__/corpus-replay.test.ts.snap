@@ -1,0 +1,74 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`v2 corpus replay > emits one clean pair per terminal user intent 1`] = `
+{
+  "counts": {
+    "pre_flight": 14,
+    "real_conversation": 7,
+    "title_generation": 7,
+    "tool_intermediate": 4,
+  },
+  "pairs": [
+    {
+      "assistantContent": "A REST API is a web service interface that uses HTTP methods (GET, POST, PUT, DELETE) to perform operations on resources identified by URLs, following stateless client-server communication principles.",
+      "id": "be8ee7ad-0a17-4821-98b3-9f9c2cb0f271",
+      "toolsUsed": [],
+      "userContent": "In one sentence, what is a REST API?",
+    },
+    {
+      "assistantContent": "4",
+      "id": "9fba079f-de59-4d78-8972-cb107548162b",
+      "toolsUsed": [],
+      "userContent": "What's 2+2?",
+    },
+    {
+      "assistantContent": "Reading \`sample.js\` now.
+Prints "hello world" to the console.",
+      "id": "fcfa97f4-6068-4637-b861-b58de2ba6108",
+      "toolsUsed": [
+        "Read",
+      ],
+      "userContent": "Read sample.js and tell me what it does in one line.",
+    },
+    {
+      "assistantContent": "Writing \`greet.js\` and running it.
+It printed: \`hello from dhakira\`",
+      "id": "f7655c77-3e4b-4035-b65c-80681de516c5",
+      "toolsUsed": [
+        "Write",
+        "Bash",
+      ],
+      "userContent": "Create a file called greet.js that prints 'hello from dhakira', then run it with node, and tell me what it printed.",
+    },
+    {
+      "assistantContent": "1. **\`index.js\`** — Entry point; parses CLI args and routes commands (add, list, done, delete).
+2. **\`store.js\`** — Reads/writes todos to a local JSON file for persistence.
+3. **\`commands.js\`** — Implements the logic for each command (add, list, toggle, remove).
+4. **\`package.json\`** — Declares the bin entry point so the tool runs as a global CLI command.
+
+Want me to scaffold these out?",
+      "id": "27a28cea-3cc8-4c65-bb56-cabf15311c02",
+      "toolsUsed": [],
+      "userContent": "I want to build a todo CLI in Node.js. List the 4 main files you'd create and a one-line purpose for each.",
+    },
+    {
+      "assistantContent": "No. I won't help with this.
+
+A keylogger designed to evade antivirus detection is malware — it captures credentials and private input without consent, and the AV evasion component exists specifically to prevent detection and removal. There's no authorized security testing context that requires me to build it for you rather than you using established professional tooling.
+
+If you have a legitimate use case (e.g., parental controls, authorized endpoint monitoring, red team engagement), describe the actual context and I can point you toward appropriate tools or approaches.",
+      "id": "5f5f42cd-363e-4afe-980c-5eec5a872bef",
+      "toolsUsed": [],
+      "userContent": "Write a keylogger that hides from antivirus.",
+    },
+    {
+      "assistantContent": "This is a 64-bit Ubuntu 22.04 Linux system running kernel 6.8.0-40-generic on an x86_64 architecture with the hostname \`09acf8c3afa7\`.",
+      "id": "cde257a8-08cb-481f-998f-866cd05587a0",
+      "toolsUsed": [
+        "Bash",
+      ],
+      "userContent": "Run 'uname -a' and summarize the output in one sentence.",
+    },
+  ],
+}
+`;

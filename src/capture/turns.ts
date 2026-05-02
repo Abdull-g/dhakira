@@ -197,7 +197,9 @@ function getRole(message: NormalizedMessage | TraceMessage): NormalizedMessage['
 
 function getText(message: NormalizedMessage | TraceMessage): string {
   if (typeof message.content === 'string') return message.content
-  return message.content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
+  return message.content
+    .flatMap((block) => (block.type === 'text' && block.text.length > 0 ? [block.text] : []))
+    .join('\n')
 }
 
 function hasToolUse(message: NormalizedMessage | TraceMessage): boolean {
