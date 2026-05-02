@@ -10,10 +10,12 @@ import { createLogger } from '../utils/logger.js'
 /**
  * Initialize the QMD store for Dhakira.
  *
- * Configures three collections:
- *   - "conversations" — markdown conversation files from the proxy capture
- *   - "memories"      — extracted memory facts about the user
- *   - "turns"         — individual turn pair files (v2 RAG-first primary index)
+ * Configures two searchable collections:
+ *   - "memories" — extracted memory facts about the user
+ *   - "turns"    — individual turn pair files (v2 RAG-first primary index)
+ *
+ * The conversations/ directory is still created as a raw audit log on disk,
+ * but it is not registered as a searchable QMD collection.
  *
  * The SQLite index lives at {walletDir}/wallet.sqlite.
  * Parent directories are created automatically if they don't exist.
@@ -31,13 +33,6 @@ export async function createWalletStore(walletDir: string): Promise<Result<QMDSt
       dbPath: join(walletDir, 'wallet.sqlite'),
       config: {
         collections: {
-          conversations: {
-            path: join(walletDir, 'conversations'),
-            pattern: '**/*.md',
-            context: {
-              '/': 'AI conversation history captured from tools like Cursor and Claude Code',
-            },
-          },
           memories: {
             path: join(walletDir, 'memories'),
             pattern: '**/*.md',

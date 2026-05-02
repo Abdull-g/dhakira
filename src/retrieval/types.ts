@@ -3,30 +3,6 @@ import type { TurnPair as CapturedTurnPair } from '../capture/turns.js'
 
 export type { CapturedTurnPair as TurnPair }
 
-export interface SearchResult {
-  /** The content that matched */
-  content: string
-  /** Which collection it came from */
-  source: 'conversations' | 'memories'
-  /** Path to the source file */
-  filePath: string
-  /** Relevance score (0-1) */
-  score: number
-  /** Additional metadata from the file */
-  metadata: Record<string, unknown>
-}
-
-export interface SearchOptions {
-  /** The search query */
-  query: string
-  /** Maximum results to return */
-  limit?: number
-  /** Minimum relevance score */
-  minScore?: number
-  /** Which collections to search */
-  collections?: ('conversations' | 'memories')[]
-}
-
 export interface TurnSearchOptions {
   /** The search query (typically the user's current message) */
   query: string

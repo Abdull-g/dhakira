@@ -77,14 +77,15 @@ describe('createWalletStore', () => {
     )
   })
 
-  it('should configure both conversations and memories collections', async () => {
+  it('should configure memories and turns collections only', async () => {
     await createWalletStore(WALLET_DIR)
     const [opts] = vi.mocked(qmdMock.createStore).mock.calls[0] as [
       { config: { collections: Record<string, unknown> } },
     ]
     const collections = opts.config.collections
-    expect(collections).toHaveProperty('conversations')
     expect(collections).toHaveProperty('memories')
+    expect(collections).toHaveProperty('turns')
+    expect(collections).not.toHaveProperty('conversations')
   })
 
   it('should set the correct path for each collection', async () => {
@@ -92,18 +93,18 @@ describe('createWalletStore', () => {
     const [opts] = vi.mocked(qmdMock.createStore).mock.calls[0] as [
       { config: { collections: Record<string, { path: string }> } },
     ]
-    const { conversations, memories } = opts.config.collections
-    expect(conversations.path).toBe(join(WALLET_DIR, 'conversations'))
+    const { memories, turns } = opts.config.collections
     expect(memories.path).toBe(join(WALLET_DIR, 'memories'))
+    expect(turns.path).toBe(join(WALLET_DIR, 'turns'))
   })
 
-  it('should use **/*.md as the glob pattern for both collections', async () => {
+  it('should use **/*.md as the glob pattern for searchable collections', async () => {
     await createWalletStore(WALLET_DIR)
     const [opts] = vi.mocked(qmdMock.createStore).mock.calls[0] as [
       { config: { collections: Record<string, { pattern: string }> } },
     ]
-    expect(opts.config.collections.conversations?.pattern).toBe('**/*.md')
     expect(opts.config.collections.memories?.pattern).toBe('**/*.md')
+    expect(opts.config.collections.turns?.pattern).toBe('**/*.md')
   })
 
   it('should return ok: false when QMD createStore throws', async () => {
