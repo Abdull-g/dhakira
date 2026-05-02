@@ -136,11 +136,28 @@ function parseRawResponse(responseBody: Buffer | string | null): unknown {
   if (responseBody === null) return null
   const text = Buffer.isBuffer(responseBody) ? responseBody.toString('utf8') : responseBody
   if (text.trim().length === 0) return null
+  const sseEvents = parseAnthropicSseText(text)
+  if (sseEvents.length > 0) return coalesceAnthropicSseEvents(sseEvents)
   try {
     return JSON.parse(text) as unknown
   } catch {
     return text
   }
+}
+
+function parseAnthropicSseText(text: string): unknown[] {
+  const events: unknown[] = []
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('data: ')) continue
+    const payload = line.slice(6).trim()
+    if (payload.length === 0 || payload === '[DONE]') continue
+    try {
+      events.push(JSON.parse(payload) as unknown)
+    } catch {
+      continue
+    }
+  }
+  return events
 }
 
 function normalizeResponseMessage(rawResponse: unknown): TraceMessage | null {

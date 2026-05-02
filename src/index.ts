@@ -3,12 +3,21 @@
 
 import { access, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import type { QMDStore } from '@tobilu/qmd'
 import { classifyConversation } from './capture/classifier.js'
-import { ingestAnthropicTrace } from './capture/ingest.js'
-import { storeTurnPairsWithContent } from './capture/turns.js'
+import { ingestAnthropicTrace, type ContentBlock, type TraceMessage } from './capture/ingest.js'
+import { applyQualityGate } from './capture/quality-gate.js'
+import { sanitizeTrace } from './capture/sanitizer.js'
+import {
+  extractTurnPairs,
+  storeTurnPairsWithContent,
+  writeExtractedPairs,
+} from './capture/turns.js'
 import type { CapturedConversation } from './capture/types.js'
 import { writeConversation } from './capture/writer.js'
 import { loadConfig } from './config/loader.js'
+import type { WalletConfig } from './config/schema.js'
 import { createDashboardServer } from './dashboard/server.js'
 import { buildInjectionBlock } from './injection/builder.js'
 import { injectIntoSystemPrompt } from './injection/injector.js'
@@ -16,6 +25,7 @@ import { loadProfile } from './injection/profile.js'
 import { computeContextFingerprint } from './proxy/fingerprint.js'
 import type { ProxyDeps } from './proxy/server.js'
 import { createProxyServer } from './proxy/server.js'
+import type { NormalizedMessage, NormalizedRequest } from './proxy/types.js'
 import { indexTurnPair, startReconciliation, stopReconciliation } from './retrieval/indexer.js'
 import { searchTurns } from './retrieval/search.js'
 import { createWalletStore } from './retrieval/store.js'
@@ -173,6 +183,163 @@ function parseAssistantResponse(responseBody: Buffer, provider: string): string 
   }
 }
 
+function traceContentToText(content: ContentBlock[]): string {
+  return content
+    .flatMap((block): string[] => {
+      if (block.type === 'text') return [block.text]
+      if (block.type === 'thinking') return [block.thinking]
+      if (block.type === 'tool_use') return [`[tool_use: ${block.name}]`]
+      if (block.type === 'tool_result') return [block.content]
+      if (block.type === 'image') return ['[image]']
+      return []
+    })
+    .join('\n')
+}
+
+function traceMessagesToNormalized(messages: TraceMessage[]): NormalizedMessage[] {
+  return messages.flatMap((message): NormalizedMessage[] => {
+    if (message.role === 'tool') return []
+    return [{ role: message.role, content: traceContentToText(message.content) }]
+  })
+}
+
+async function writeAndIndexTurnPairs(
+  store: QMDStore,
+  resultsPromise: Promise<Awaited<ReturnType<typeof writeExtractedPairs>>>,
+  walletDir: string,
+  tool: string,
+): Promise<void> {
+  const results = await resultsPromise
+  let stored = 0
+  for (const result of results) {
+    if (result.ok) {
+      stored++
+      try {
+        await indexTurnPair(store, result.value.filePath, result.value.content, walletDir)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        log.error('Direct index registration failed', { error: message })
+        // Not fatal — background reconciliation will catch it
+      }
+    }
+  }
+  if (stored > 0) {
+    emit(`${fmtTime()} Captured ${stored} turn${stored === 1 ? '' : 's'} (${tool})`)
+  }
+}
+
+export async function captureConversationOnce(
+  normalized: NormalizedRequest,
+  responseBody: Buffer,
+  config: WalletConfig,
+  store: QMDStore,
+): Promise<void> {
+  if (config.capture.pipelineVersion === 'v2' && normalized.provider === 'anthropic') {
+    const traceResult = ingestAnthropicTrace({
+      requestBody: normalized.rawBody,
+      responseBody,
+      sourceTool: normalized.tool,
+    })
+
+    if (traceResult.ok) {
+      const trace = traceResult.value
+      const classification = classifyConversation(trace)
+      if (!classification.keep) return
+
+      const sanitized = sanitizeTrace(trace).trace
+      const conversationMessages = traceMessagesToNormalized(sanitized.messages)
+      const conversation: CapturedConversation = {
+        id: generateId('conv'),
+        tool: normalized.tool,
+        provider: normalized.provider,
+        model: normalized.model,
+        messages: conversationMessages,
+        timestamp: normalized.timestamp,
+        tokenEstimate: estimateMessagesTokens(conversationMessages),
+        incognito: config.incognito,
+      }
+
+      await writeConversation(conversation, config.walletDir)
+
+      const captureFingerprint = computeContextFingerprint(sanitized.systemPrompt)
+      const pairs = extractTurnPairs(
+        sanitized.messages,
+        conversation.tool,
+        conversation.id,
+        conversation.timestamp,
+        captureFingerprint,
+      )
+      const gatedPairs = applyQualityGate(pairs)
+      await writeAndIndexTurnPairs(
+        store,
+        writeExtractedPairs(gatedPairs, config.walletDir),
+        config.walletDir,
+        conversation.tool,
+      )
+      return
+    }
+
+    log.debug('V2 ingest failed, falling back to v1 capture path', {
+      error: traceResult.error.message,
+    })
+  }
+
+  const messages =
+    normalized.systemPrompt !== null
+      ? [{ role: 'system' as const, content: normalized.systemPrompt }, ...normalized.messages]
+      : normalized.messages
+
+  // Parse the assistant's response from the response body and append it
+  // so turn pair extraction can pair user→assistant messages.
+  const assistantContent = parseAssistantResponse(responseBody, normalized.provider)
+  const messagesWithResponse = assistantContent
+    ? [...messages, { role: 'assistant' as const, content: assistantContent }]
+    : messages
+
+  const conversation: CapturedConversation = {
+    id: generateId('conv'),
+    tool: normalized.tool,
+    provider: normalized.provider,
+    model: normalized.model,
+    messages: messagesWithResponse,
+    timestamp: normalized.timestamp,
+    tokenEstimate: estimateMessagesTokens(messagesWithResponse),
+    incognito: config.incognito,
+  }
+
+  await writeConversation(conversation, config.walletDir)
+
+  // Fingerprint the original system prompt (before our injection) so turns
+  // are tagged with the tool's project context at capture time.
+  const captureFingerprint = computeContextFingerprint(normalized.systemPrompt)
+
+  // Write turn pairs to disk AND register directly into QMD's SQLite index.
+  // Direct registration makes turns instantly BM25-searchable via FTS5 triggers.
+  // Vector embeddings are generated later by background reconciliation.
+  await writeAndIndexTurnPairs(
+    store,
+    storeTurnPairsWithContent(
+      messagesWithResponse,
+      conversation.tool,
+      conversation.id,
+      conversation.timestamp,
+      config.walletDir,
+      captureFingerprint,
+    ),
+    config.walletDir,
+    conversation.tool,
+  )
+}
+
+export function createCaptureConversation(
+  config: WalletConfig,
+  store: QMDStore,
+): NonNullable<ProxyDeps['captureConversation']> {
+  return (normalized, responseBody) => {
+    captureConversationOnce(normalized, responseBody, config, store).catch(() => {})
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -254,87 +421,7 @@ export async function main(): Promise<void> {
       return injectIntoSystemPrompt(normalized.systemPrompt, injectionBlock)
     },
 
-    captureConversation: (normalized, responseBody) => {
-      if (config.capture.pipelineVersion === 'v2' && normalized.provider === 'anthropic') {
-        const traceResult = ingestAnthropicTrace({
-          requestBody: normalized.rawBody,
-          responseBody,
-          sourceTool: normalized.tool,
-        })
-
-        if (traceResult.ok) {
-          const classification = classifyConversation(traceResult.value)
-          if (!classification.keep) return
-        }
-      }
-
-      const messages =
-        normalized.systemPrompt !== null
-          ? [{ role: 'system' as const, content: normalized.systemPrompt }, ...normalized.messages]
-          : normalized.messages
-
-      // Parse the assistant's response from the response body and append it
-      // so turn pair extraction can pair user→assistant messages.
-      const assistantContent = parseAssistantResponse(responseBody, normalized.provider)
-      const messagesWithResponse = assistantContent
-        ? [...messages, { role: 'assistant' as const, content: assistantContent }]
-        : messages
-
-      const conversation: CapturedConversation = {
-        id: generateId('conv'),
-        tool: normalized.tool,
-        provider: normalized.provider,
-        model: normalized.model,
-        messages: messagesWithResponse,
-        timestamp: normalized.timestamp,
-        tokenEstimate: estimateMessagesTokens(messagesWithResponse),
-        incognito: config.incognito,
-      }
-
-      writeConversation(conversation, config.walletDir).catch(() => {})
-
-      // Fingerprint the original system prompt (before our injection) so turns
-      // are tagged with the tool's project context at capture time.
-      const captureFingerprint = computeContextFingerprint(normalized.systemPrompt)
-
-      // Write turn pairs to disk AND register directly into QMD's SQLite index.
-      // Direct registration makes turns instantly BM25-searchable via FTS5 triggers.
-      // Vector embeddings are generated later by background reconciliation.
-      storeTurnPairsWithContent(
-        messagesWithResponse,
-        conversation.tool,
-        conversation.id,
-        conversation.timestamp,
-        config.walletDir,
-        captureFingerprint,
-      )
-        .then(async (results) => {
-          let stored = 0
-          for (const result of results) {
-            if (result.ok) {
-              stored++
-              try {
-                await indexTurnPair(
-                  store,
-                  result.value.filePath,
-                  result.value.content,
-                  config.walletDir,
-                )
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err)
-                log.error('Direct index registration failed', { error: message })
-                // Not fatal — background reconciliation will catch it
-              }
-            }
-          }
-          if (stored > 0) {
-            emit(
-              `${fmtTime()} Captured ${stored} turn${stored === 1 ? '' : 's'} (${conversation.tool})`,
-            )
-          }
-        })
-        .catch(() => {})
-    },
+    captureConversation: createCaptureConversation(config, store),
   }
 
   const proxyServer = createProxyServer(config, deps)
@@ -376,7 +463,9 @@ export async function main(): Promise<void> {
   process.on('SIGTERM', shutdown)
 }
 
-main().catch((err: unknown) => {
-  log.error('Fatal error', { error: String(err) })
-  process.exit(1)
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err: unknown) => {
+    log.error('Fatal error', { error: String(err) })
+    process.exit(1)
+  })
+}

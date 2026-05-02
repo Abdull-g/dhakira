@@ -501,7 +501,8 @@ async function commandInit(): Promise<void> {
 `)
 
   // Start the server (keeps the process alive)
-  await import('./index.js')
+  const { main } = await import('./index.js')
+  await main()
 }
 
 /** Check if a port is already in use */
@@ -568,9 +569,9 @@ async function commandStart(args: string[]): Promise<void> {
     process.env.DHAKIRA_VERBOSE = '1'
   }
 
-  // Importing index.js executes main() which starts the servers and keeps the
-  // event loop alive. CLI process stays alive via the open server handles.
-  await import('./index.js')
+  // Start main(), which opens the proxy/dashboard handles and keeps the process alive.
+  const { main } = await import('./index.js')
+  await main()
 }
 
 async function commandStop(): Promise<void> {

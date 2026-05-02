@@ -349,6 +349,19 @@ export async function writeTurnPairWithContent(
 }
 
 /**
+ * Write already-extracted turn pairs to disk and return path+content for indexing.
+ *
+ * Unlike storeTurnPairsWithContent, this does not re-run extraction. Use it when
+ * earlier capture stages have already sanitized, extracted, and filtered pairs.
+ */
+export async function writeExtractedPairs(
+  pairs: TurnPair[],
+  walletDir: string,
+): Promise<Array<Result<StoredTurnPair>>> {
+  return Promise.all(pairs.map((pair) => writeTurnPairWithContent(pair, walletDir)))
+}
+
+/**
  * Extract turn pairs from a conversation and write each one to disk.
  *
  * This is the main entry point called from the capture pipeline.
