@@ -199,12 +199,28 @@ injection:
   recencyBoost: 0.3       # How much to favor recent conversations
   maxTurns: 8             # Max past conversations to inject
 
+capture:
+  pipelineVersion: v2      # v2 is used for new installs
+  debug: false             # Keep capture diagnostics off by default
+
 incognito: false          # Pause capture and injection globally
 ```
 
 API keys support `env:VAR_NAME` syntax — Dhakira reads from your environment, never stores keys in the config file.
 
 Wildcard matching (`apiKey: "*"`) is available for tools that use OAuth tokens or non-standard auth.
+
+### Capture Pipeline
+
+New installs use the v2 capture pipeline, which skips Claude Code title/tool-intermediate calls and strips proven harness boilerplate before storing turn pairs. Existing wallets without `capture.pipelineVersion` continue to use v1 until you opt in:
+
+```yaml
+capture:
+  pipelineVersion: v2
+  debug: false
+```
+
+Switch back to `pipelineVersion: v1` if you need to roll back capture behavior.
 
 ## Your Wallet
 

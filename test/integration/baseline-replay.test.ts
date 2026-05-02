@@ -1,15 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
-import { extractTurnPairs } from '../../src/capture/turns.ts'
+import { describe, expect, it } from 'vitest'
 import { parseAnthropicRequest } from '../../src/proxy/anthropic.ts'
 import type { NormalizedMessage } from '../../src/proxy/types.ts'
-
-let turnCounter = 0
-
-vi.mock('../../src/utils/ids.ts', () => ({
-  generateId: (prefix: string) => `${prefix}_baseline_${String(turnCounter++).padStart(4, '0')}`,
-}))
 
 interface CorpusRecord {
   id: string
@@ -67,6 +60,25 @@ function parseAssistantResponse(record: CorpusRecord): string | null {
   }
 }
 
+function extractV1BaselinePairs(messages: NormalizedMessage[]): BaselineRecordOutput['pairs'] {
+  const conversationMessages = messages.filter((message) => message.role !== 'system')
+  const pairs: BaselineRecordOutput['pairs'] = []
+  let i = 0
+
+  while (i < conversationMessages.length) {
+    const message = conversationMessages[i]
+    const next = conversationMessages[i + 1]
+    if (message?.role === 'user' && next?.role === 'assistant') {
+      pairs.push({ userContent: message.content, assistantContent: next.content })
+      i += 2
+      continue
+    }
+    i++
+  }
+
+  return pairs
+}
+
 function parseAnthropicSseText(raw: string): string | null {
   const parts: string[] = []
   for (const line of raw.split('\n')) {
@@ -81,9 +93,7 @@ function parseAnthropicSseText(raw: string): string | null {
       if (isRecord(delta) && delta.type === 'text_delta' && typeof delta.text === 'string') {
         parts.push(delta.text)
       }
-    } catch {
-      continue
-    }
+    } catch {}
   }
 
   const text = parts.join('')
@@ -109,30 +119,23 @@ function replayCurrentPipeline(record: CorpusRecord): BaselineRecordOutput {
 
   const assistantContent = parseAssistantResponse(record)
   const messagesWithResponse: NormalizedMessage[] =
-    assistantContent !== null ? [...messages, { role: 'assistant', content: assistantContent }] : messages
+    assistantContent !== null
+      ? [...messages, { role: 'assistant', content: assistantContent }]
+      : messages
 
-  const pairs = extractTurnPairs(
-    messagesWithResponse,
-    parsed.value.tool,
-    `conv_${record.id}`,
-    new Date(record.startedAt),
-  )
+  const pairs = extractV1BaselinePairs(messagesWithResponse)
 
   return {
     id: record.id,
     url: record.url,
     status: record.respStatus,
     pairCount: pairs.length,
-    pairs: pairs.map((pair) => ({
-      userContent: pair.userContent,
-      assistantContent: pair.assistantContent,
-    })),
+    pairs,
   }
 }
 
 describe('baseline corpus replay (current v1 pipeline)', () => {
   it('snapshots the current pipeline output for every corpus record', async () => {
-    turnCounter = 0
     const records = await loadCorpus()
     expect(records).toHaveLength(40)
 

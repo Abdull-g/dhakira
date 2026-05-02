@@ -233,6 +233,11 @@ async function probeLocalServer(server: LocalServer): Promise<boolean> {
 function generateConfigYaml(detected: ToolDef[], localServers: LocalServer[]): string {
   const lines: string[] = ['# Dhakira configuration', '']
 
+  lines.push('capture:')
+  lines.push('  pipelineVersion: v2')
+  lines.push('  debug: false')
+  lines.push('')
+
   const hasTools = detected.length > 0 || localServers.length > 0
 
   if (!hasTools) {
@@ -523,11 +528,15 @@ async function commandStart(args: string[]): Promise<void> {
     const pid = await readPid(walletDir)
     if (pid !== null && isProcessRunning(pid)) {
       console.log(`\n  ${c.yellow('Already running.')} ${c.dim(`(PID ${pid})`)}`)
-      console.log(`  Run ${c.cyan(`${cmdPrefix()} stop`)} first, or ${c.cyan(`${cmdPrefix()} status`)} to check.\n`)
+      console.log(
+        `  Run ${c.cyan(`${cmdPrefix()} stop`)} first, or ${c.cyan(`${cmdPrefix()} status`)} to check.\n`,
+      )
       return
     }
     if (await isPortInUse(4100, '127.0.0.1')) {
-      console.log(`\n  ${c.yellow('Port 4100 is already in use.')} Something is running on that port.`)
+      console.log(
+        `\n  ${c.yellow('Port 4100 is already in use.')} Something is running on that port.`,
+      )
       console.log(`  Run ${c.cyan(`${cmdPrefix()} stop`)} or check what's using it.\n`)
       return
     }
@@ -556,7 +565,7 @@ async function commandStart(args: string[]): Promise<void> {
   }
 
   if (verbose) {
-    process.env['DHAKIRA_VERBOSE'] = '1'
+    process.env.DHAKIRA_VERBOSE = '1'
   }
 
   // Importing index.js executes main() which starts the servers and keeps the
