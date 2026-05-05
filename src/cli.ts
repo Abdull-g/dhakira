@@ -230,7 +230,11 @@ async function probeLocalServer(server: LocalServer): Promise<boolean> {
   }
 }
 
-function generateConfigYaml(detected: ToolDef[], localServers: LocalServer[]): string {
+function generateConfigYaml(
+  detected: ToolDef[],
+  localServers: LocalServer[],
+  addAnthropicWildcard: boolean,
+): string {
   const lines: string[] = ['# Dhakira configuration', '']
 
   lines.push('capture:')
@@ -238,7 +242,7 @@ function generateConfigYaml(detected: ToolDef[], localServers: LocalServer[]): s
   lines.push('  debug: false')
   lines.push('')
 
-  const hasTools = detected.length > 0 || localServers.length > 0
+  const hasTools = detected.length > 0 || localServers.length > 0 || addAnthropicWildcard
 
   if (!hasTools) {
     lines.push('tools:')
@@ -271,6 +275,13 @@ function generateConfigYaml(detected: ToolDef[], localServers: LocalServer[]): s
     lines.push('    provider: openai')
     lines.push(`    apiKey: "${s.name.toLowerCase().replace(/\s+/g, '-')}"`)
     lines.push(`    baseUrl: ${s.baseUrl}`)
+  }
+
+  if (addAnthropicWildcard) {
+    lines.push('  - name: Claude Code (subscription)')
+    lines.push('    provider: anthropic')
+    lines.push('    apiKey: "*"')
+    lines.push('    baseUrl: https://api.anthropic.com')
   }
 
   lines.push('')
@@ -387,6 +398,15 @@ async function commandInit(): Promise<void> {
     }
   }
 
+  let addAnthropicWildcard = false
+  if (!detected.some((tool) => tool.provider === 'anthropic')) {
+    console.log('')
+    console.log(`  Do you use Claude Code with a Max/Pro subscription (not API key)?`)
+    console.log(`  This adds a pass-through config so Dhakira can proxy your OAuth traffic.`)
+    const subscription = await prompt(`  [y/N] › `)
+    addAnthropicWildcard = subscription.toLowerCase() === 'y'
+  }
+
   // Detect local model servers
   const detectedLocal: LocalServer[] = []
   for (const server of LOCAL_SERVERS) {
@@ -416,7 +436,7 @@ async function commandInit(): Promise<void> {
   await mkdir(join(walletDir, 'memories'), { recursive: true })
   await writeFile(
     join(walletDir, 'config.yaml'),
-    generateConfigYaml(detected, detectedLocal),
+    generateConfigYaml(detected, detectedLocal, addAnthropicWildcard),
     'utf8',
   )
   console.log(`  ${c.green('✓')} Wallet: ${c.cyan(tildePath(walletDir))}`)
