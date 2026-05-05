@@ -53,6 +53,27 @@ function emit(line: string): void {
   process.stdout.write(`${line}\n`)
 }
 
+// Warm up models by reaching into QMD's internal llm handle to call
+// expandQuery/embed/rerank directly. QMD has no public warmup API as
+// of the current version. If QMD refactors `internal.llm`, this
+// warmup will silently become a no-op (guarded by optional chaining);
+// the product still works, just with slow first-use.
+async function warmupSearchModels(store: QMDStore): Promise<boolean> {
+  const llm = store.internal?.llm
+  if (llm === undefined) {
+    log.warn('Model warmup skipped: QMD internal llm handle unavailable')
+    return false
+  }
+
+  emit(`  Warming up search models (~2.25GB first time, one-time download)...`)
+
+  await llm.expandQuery('warmup')
+  await llm.embed('task: search result | query: warmup')
+  await llm.rerank('warmup', [{ file: 'warmup', text: 'warmup document' }])
+
+  return true
+}
+
 // ---------------------------------------------------------------------------
 // Personality line helpers
 // ---------------------------------------------------------------------------
@@ -433,6 +454,15 @@ export async function main(): Promise<void> {
   // (warms up models and indexes any turns from previous sessions), then
   // repeats every 5 minutes as a safety net for crash recovery and manual edits.
   startReconciliation(store)
+  const warmupPromise = warmupSearchModels(store).catch((err: unknown) => {
+    log.warn('Model warmup failed (non-fatal)', { error: String(err) })
+    return false
+  })
+  warmupPromise.then((warmed) => {
+    if (warmed) {
+      emit(`  Search models ready.`)
+    }
+  })
 
   proxyServer.listen(config.proxy.port, config.proxy.host, () => {
     emit(`\n  Proxy listening on http://${config.proxy.host}:${config.proxy.port}`)
