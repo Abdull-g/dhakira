@@ -452,7 +452,10 @@ export async function main(): Promise<void> {
       closed++
       if (closed === 2) {
         emit(`\n  Stopped. Your AI is on its own now.\n`)
-        process.exit(0)
+        // Force exit via SIGKILL on self to skip native GPU destructor
+        // (upstream llama.cpp Metal cleanup crashes on Apple Silicon).
+        // Sockets and pid file are already cleaned up above.
+        setImmediate(() => process.kill(process.pid, 'SIGKILL'))
       }
     }
     proxyServer.close(onClose)
