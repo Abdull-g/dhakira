@@ -4,6 +4,34 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-05-06
+
+A quality-of-life release focused on onboarding and first-run experience.
+
+### Added
+
+- **Claude subscription (Max/Pro) support via wildcard tool config.** `dhakira init` now detects when no `ANTHROPIC_API_KEY` is present and offers to add a pass-through Anthropic tool (`apiKey: "*"`) so Claude Code subscription users can route their OAuth-authenticated traffic through Dhakira without an API key.
+- **Startup model warmup.** All three search models (query expansion, embeddings, reranker) now download and load at `dhakira start`, with visible progress messages. First user prompts are no longer blocked by a ~2.25 GB download. Falls back gracefully on failure.
+- **Health check handling for `/` probes.** Claude Code's `GET /` and `HEAD /` startup probes now return a clean `204 No Content` instead of a misleading "No matching tool configuration" warning.
+
+### Fixed
+
+- **Wrong wiring flags in post-init output.** `dhakira init` no longer prints `claude --api-base ...` (which doesn't exist as a Claude Code flag). Uses correct `ANTHROPIC_BASE_URL` env var for Claude Code and `--openai-api-base` for aider.
+- **Clean Ctrl+C shutdown on Apple Silicon.** Graceful shutdown no longer trails a `GGML_ASSERT` / `Abort trap: 6` stack trace from upstream `node-llama-cpp` Metal teardown. Dhakira now force-exits cleanly after its "Stopped." message.
+- **Help text no longer suggests `npm install -g dhakira` when already installed globally.** The tip now only appears when running via `npx`.
+
+### Notes
+
+- This release does not change the capture pipeline. v2 remains Anthropic-only; OpenAI-format tools continue to use v1 capture. Universal v2 (including `ingestOpenAITrace`) is planned for v0.2.2.
+
+### Upgrade
+
+```bash
+npm install -g dhakira@latest
+```
+
+Existing wallets and configs are compatible — no migration needed.
+
 ## [0.2.0] — 2026-05-03
 
 ### Added
