@@ -481,12 +481,18 @@ async function commandInit(): Promise<void> {
   const hasLocal = detectedLocal.length > 0
   const hasCloud = detected.length > 0
 
-  console.log(`
-  Point your AI tool to Dhakira:
-
-    Claude Code:   ${c.dim('claude --api-base http://localhost:4100')}
-    aider:         ${c.dim('aider --api-base http://localhost:4100')}
-    Continue.dev:  ${c.dim('set apiBase to http://localhost:4100 in config')}`)
+  console.log(`  ${c.bold('Next steps:')}`)
+  console.log('')
+  console.log(`  ${c.dim('# Claude Code')}`)
+  console.log(`  export ANTHROPIC_BASE_URL=http://localhost:4100`)
+  console.log(`  claude`)
+  console.log('')
+  console.log(`  ${c.dim('# aider')}`)
+  console.log(`  aider --openai-api-base http://localhost:4100/v1`)
+  console.log('')
+  console.log(`  ${c.dim('# Any OpenAI-compatible tool')}`)
+  console.log(`  export OPENAI_BASE_URL=http://localhost:4100/v1`)
+  console.log('')
 
   if (hasLocal && !hasCloud) {
     console.log(`
