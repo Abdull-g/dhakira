@@ -328,6 +328,14 @@ async function handleRequest(
 
   const rawBodyBuffer = await readBody(req)
 
+  // Bare root path with no body: treat as health check.
+  // Claude Code probes GET / and HEAD / at base URL on startup.
+  if (requestUrl === '/' && (method === 'GET' || method === 'HEAD') && rawBodyBuffer.length === 0) {
+    res.writeHead(204, { 'content-type': 'text/plain' })
+    res.end()
+    return
+  }
+
   let parsedBody: unknown = null
   if (rawBodyBuffer.length > 0) {
     try {
