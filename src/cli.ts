@@ -335,15 +335,22 @@ function generateSystemdService(execPath: string, scriptPath: string): string {
 // Commands
 // ---------------------------------------------------------------------------
 
-/** Detect if running via npx or as a global install */
-function cmdPrefix(): string {
+function isNpxInvocation(): boolean {
   const execPath = process.argv[1] ?? ''
   // npx puts binaries in a _npx cache dir; global installs go to bin/
-  return execPath.includes('_npx') ? 'npx dhakira' : 'dhakira'
+  return execPath.includes('_npx')
+}
+
+/** Detect if running via npx or as a global install */
+function cmdPrefix(): string {
+  return isNpxInvocation() ? 'npx dhakira' : 'dhakira'
 }
 
 function printHelp(): void {
   const cmd = cmdPrefix()
+  const installTip = isNpxInvocation()
+    ? `\n  ${c.bold('Tip:')}  Install globally for convenience: ${c.dim('npm install -g dhakira')}\n`
+    : ''
   console.log(`
   ${c.bold('dhakira')} — Your AI, with memory.
 
@@ -361,9 +368,7 @@ function printHelp(): void {
   ${c.bold('Options:')}
     start -d   Run in background (daemon mode)
     start -v   Show verbose injection details
-
-  ${c.bold('Tip:')}  Install globally for convenience: ${c.dim('npm install -g dhakira')}
-
+${installTip}
   ${c.dim('Docs: https://github.com/Abdull-g/dhakira')}
 `)
 }
