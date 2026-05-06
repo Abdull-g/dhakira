@@ -9,32 +9,69 @@
 
 Every AI session starts from zero. Dhakira changes that.
 
-> **What's new in v0.2:** A new multi-stage capture pipeline (classifier → sanitizer → extractor → quality gate) produces clean, per-turn memories with zero provider boilerplate. See the [changelog](CHANGELOG.md) for details.
-
 Dhakira is a local proxy that sits between your AI tools and their APIs. It captures your conversations, learns from them, and quietly injects relevant context into future sessions — so every tool you use already knows you.
 
 Your data never leaves your machine. No cloud. No account. Just a folder.
 
+> **v0.2.1** adds Claude Max/Pro subscription support, fixes first-run onboarding, and eliminates the first-prompt freeze while models download. See the [changelog](CHANGELOG.md) for details.
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Supported Tools](#supported-tools)
+- [How It Works](#how-it-works)
+- [What Gets Injected](#what-gets-injected)
+- [Full Local Stack](#full-local-stack)
+- [CLI](#cli)
+- [Dashboard](#dashboard)
+- [Configuration](#configuration)
+- [Your Wallet](#your-wallet)
+- [Privacy](#privacy)
+- [Requirements](#requirements)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Quick Start
 
 ```bash
-npx dhakira init
+npm install -g dhakira
+dhakira init
+dhakira start
 ```
 
-That's it. Dhakira detects your API keys (or local models), creates a wallet at `~/.dhakira`, and starts the proxy. Point your tool at it:
+`init` detects your API keys (or Claude Max/Pro subscription), writes `~/.dhakira/config.yaml`, and creates your wallet. `start` launches the proxy on `localhost:4100` and the dashboard on `localhost:4101`.
+
+On first start, Dhakira downloads ~2.25 GB of local search models (query expansion, embeddings, reranker). This happens once — a progress line keeps you posted, and the proxy is ready to accept traffic the moment warmup finishes.
+
+Point your AI tool at Dhakira:
 
 ```bash
-# Claude Code
-claude --api-base http://localhost:4100
+# Claude Code (API key or Max/Pro subscription)
+export ANTHROPIC_BASE_URL=http://localhost:4100
+claude
 
 # aider
-aider --api-base http://localhost:4100
+aider --openai-api-base http://localhost:4100/v1
 
 # Any OpenAI-compatible tool
 export OPENAI_BASE_URL=http://localhost:4100/v1
 ```
 
-Start coding. After a few sessions, you'll notice your AI remembering things you've told it before — without you repeating yourself.
+Start working. After a few sessions, you'll notice your AI remembering things you've told it before — without you repeating yourself.
+
+## Supported Tools
+
+| Tool | Setup |
+|------|-------|
+| **Claude Code (API key)** | `export ANTHROPIC_API_KEY=...` then `export ANTHROPIC_BASE_URL=http://localhost:4100` |
+| **Claude Code (Max/Pro subscription)** | `dhakira init` offers a subscription option when no API key is found. Then `export ANTHROPIC_BASE_URL=http://localhost:4100` |
+| **aider** | `aider --openai-api-base http://localhost:4100/v1` |
+| **Continue.dev** | Set `apiBase: http://localhost:4100/v1` on your model in `~/.continue/config.yaml` |
+| **Any OpenAI-compatible tool** | Set the tool's base URL to `http://localhost:4100/v1` |
+| **Ollama-backed tools** | Point at Dhakira; configure Ollama as the upstream in `config.yaml` |
+
+> **Cursor, Copilot, ChatGPT, Claude.ai web/app:** these route API calls through their vendors' own servers, so a local proxy on `localhost` can't intercept them. Cursor's BYOK mode lets you set a custom base URL, but it needs a publicly reachable endpoint — Dhakira ships as localhost only, so this path isn't supported today.
 
 ## How It Works
 
@@ -63,26 +100,28 @@ Start coding. After a few sessions, you'll notice your AI remembering things you
 
 Everything happens locally. Search uses hybrid retrieval (BM25 + semantic embeddings + reranking) via local GGUF models — no API calls for search or embeddings.
 
+Dhakira auto-detects whether a request is in Anthropic or OpenAI format based on URL and headers. You don't configure the format — just point your tool at `localhost:4100` (or `:4100/v1` for OpenAI-compatible tools) and it works.
+
 ## What Gets Injected
 
-Dhakira injects a small context block (~1500 tokens) into every conversation:
+Dhakira appends a small context block (~1500 tokens) to the end of your tool's system prompt. The block looks like this:
 
 ```text
-── dhakira_context ──────────────────────────
+<dhakira_context>
 
-About You
+## About You
 - TypeScript developer, based in Riyadh
 - Working on a RAG-based memory system
 - Prefers functional patterns, no classes
 
-Relevant Past Conversations
+## Relevant Past Conversations
 [2026-03-28] You: How should I handle connection pooling in PostgreSQL?
 → Used pgBouncer with pool_mode=transaction after testing session mode.
 
 [2026-03-25] You: What's the best hybrid search library for Node.js?
 → Evaluated QMD, LanceDB, and ChromaDB. Chose QMD for BM25+vector combo.
 
-─────────────────────────────────────────────
+</dhakira_context>
 ```
 
 The context is different every time — tailored to what you're actually working on. If you're debugging auth, you get auth-related history. If you're designing a schema, you get schema discussions.
@@ -104,38 +143,21 @@ tools:
     baseUrl: http://localhost:11434/v1
 ```
 
-`dhakira init` automatically detects Ollama, LM Studio, and LocalAI if they're running. Works with any server that speaks the OpenAI API format.
+`dhakira init` auto-detects Ollama, LM Studio, and LocalAI if they're running. Works with any server that speaks the OpenAI API format.
 
 **Your data. Your models. Your machine.**
-
-## Supported Tools
-
-Dhakira works with any tool that lets you set a custom API endpoint:
-
-| Tool | Setup |
-|------|-------|
-| **Claude Code** | `claude --api-base http://localhost:4100` |
-| **aider** | `aider --api-base http://localhost:4100` |
-| **Continue.dev** | Set `apiBase` to `http://localhost:4100` in config |
-| **Open Interpreter** | `interpreter --api-base http://localhost:4100` |
-| **Ollama-backed tools** | Point to Dhakira instead of Ollama directly |
-| **Any OpenAI-compatible** | Set base URL to `http://localhost:4100/v1` |
-
-For Anthropic-format tools, Dhakira auto-detects the format from the request — no extra configuration needed.
 
 ## CLI
 
 ```
-npx dhakira init       Set up Dhakira for the first time
-npx dhakira start      Start the proxy (foreground)
-npx dhakira start -d   Start in background (daemon)
-npx dhakira start -v   Verbose — show what memories are injected
-npx dhakira stop       Stop a running instance
-npx dhakira status     Show stats
-npx dhakira reset      Delete your wallet and start fresh
+dhakira init       Set up Dhakira for the first time
+dhakira start      Start the proxy (foreground)
+dhakira start -d   Start in background (daemon)
+dhakira start -v   Verbose — show which memories are injected
+dhakira stop       Stop a running instance
+dhakira status     Show stats
+dhakira reset      Delete your wallet and start fresh
 ```
-
-Or install globally for convenience: `npm install -g dhakira` — then use `dhakira` directly.
 
 ### Status
 
@@ -157,6 +179,8 @@ $ dhakira status
 ```
 $ dhakira start -v
 
+  Warming up search models (~2.25GB first time, one-time download)...
+  [4:33 PM] Search models ready.
   [4:35 PM] 3 turns injected (0.41s)
     → "PostgreSQL connection pooling" (Mar 25)
     → "API authentication flow" (Mar 24)
@@ -183,7 +207,7 @@ dashboard:
   host: 127.0.0.1
 
 tools:
-  # Cloud providers
+  # Cloud providers — API key path
   - name: Claude Code
     provider: anthropic
     apiKey: env:ANTHROPIC_API_KEY
@@ -194,6 +218,12 @@ tools:
     apiKey: env:OPENAI_API_KEY
     baseUrl: https://api.openai.com/v1
 
+  # Claude Max/Pro subscription — pass-through auth
+  - name: Claude Code (subscription)
+    provider: anthropic
+    apiKey: "*"
+    baseUrl: https://api.anthropic.com
+
   # Local models
   - name: Ollama
     provider: openai
@@ -203,31 +233,34 @@ tools:
 injection:
   maxTokens: 1800        # Total injection budget
   minRelevanceScore: 0.3  # Minimum score to include a memory
-  recencyBoost: 0.3       # How much to favor recent conversations
+  recencyBoost: 0.3       # Favor more recent conversations
   maxTurns: 8             # Max past conversations to inject
 
 capture:
   pipelineVersion: v2      # v2 is used for new installs
-  debug: false             # Keep capture diagnostics off by default
+  debug: false
 
 incognito: false          # Pause capture and injection globally
 ```
 
 API keys support `env:VAR_NAME` syntax — Dhakira reads from your environment, never stores keys in the config file.
 
-Wildcard matching (`apiKey: "*"`) is available for tools that use OAuth tokens or non-standard auth.
+### Wildcard matching (`apiKey: "*"`)
+
+Wildcard tools pass the caller's original auth headers through untouched. This is how Claude Code's Max/Pro subscription (OAuth bearer) routes through Dhakira without an API key. `dhakira init` offers to set this up for you when no `ANTHROPIC_API_KEY` is detected.
 
 ### Capture Pipeline
 
-New installs use the v2 capture pipeline, which skips Claude Code title/tool-intermediate calls and strips proven harness boilerplate before storing turn pairs. Existing wallets without `capture.pipelineVersion` continue to use v1 until you opt in:
+New installs use the v2 capture pipeline for Anthropic-format traffic (Claude Code). It runs a classifier, sanitizer, tool-aware extractor, and quality gate so your wallet stores clean per-turn memories instead of harness boilerplate.
+
+OpenAI-format traffic (aider, Continue, Ollama) uses the simpler v1 pipeline today. Extending v2 to OpenAI is on the roadmap for v0.2.2.
+
+Switch behavior with:
 
 ```yaml
 capture:
-  pipelineVersion: v2
-  debug: false
+  pipelineVersion: v2   # or v1 to roll back
 ```
-
-Switch back to `pipelineVersion: v1` if you need to roll back capture behavior.
 
 ## Your Wallet
 
@@ -262,38 +295,53 @@ It's just files. Back them up. Sync them. Move them to another machine. Grep the
 **What Dhakira doesn't do:**
 - Send data anywhere. All storage and search is local.
 - Phone home. No telemetry, no analytics, no update checks.
-- Store your API keys. Keys use `env:` references, not plaintext.
+- Store your API keys in config. Keys use `env:` references.
 - Touch anything outside `~/.dhakira`.
 
-**Secret filtering:** Dhakira scans for API keys, passwords, and tokens before storing conversations. Detected secrets are replaced with `[REDACTED]`.
+### Secret filtering
 
-**Incognito mode:** Toggle in the dashboard or set `incognito: true` in config. Dhakira stops capturing and injecting — your tools work normally, but nothing is remembered.
+Before writing any turn to disk, Dhakira runs a regex pass that redacts common API key, password, and token formats (11 known patterns covering OpenAI, Anthropic, GitHub, Slack, AWS, JWT, generic bearer tokens, and a few others). Matches get replaced with `[REDACTED]`.
+
+This is defense in depth, not a security boundary. Its real purpose is to prevent a secret you pasted in one conversation from being injected back into a future conversation (and re-transmitted to an LLM). If you want guaranteed coverage for high-sensitivity workflows, use `incognito: true` and handle the sensitive work outside Dhakira.
+
+### Incognito mode
+
+Toggle in the dashboard or set `incognito: true` in config. Dhakira stops capturing and injecting — your tools work normally, but nothing is remembered.
 
 ## Requirements
 
-- **Node.js 22+** (required by the search engine)
-- **~500MB disk** for search models (downloaded once on first use)
-- Works on macOS and Linux. Intel and ARM.
+- **Node.js 22+**
+- **~2.25 GB disk** for local search models (one-time download on first run)
+- macOS and Linux. Intel and ARM.
 
 ## FAQ
 
 **Does Dhakira slow down my AI tool?**
-Search takes 50-400ms depending on your wallet size. The first request after startup is slower (~2-3 min) because the embedding model needs to load — after that, it stays warm.
+Search takes 50–400ms depending on your wallet size. Models warm up at `dhakira start`, so your first prompt doesn't wait for a download. After warmup, injection runs in parallel with your request.
 
 **What happens if Dhakira is down?**
-Your tool gets "connection refused" on localhost:4100 and won't work until you either restart Dhakira or point your tool back at the original API.
+Your tool gets "connection refused" on localhost:4100. Either restart Dhakira, or unset `ANTHROPIC_BASE_URL` (or whatever you set) to fall back to the provider directly.
 
 **Can I use this with Cursor?**
-Not directly. Cursor routes API calls through its own servers, so the local proxy can't intercept them unless you use Cursor's BYOK mode with a custom base URL pointed at Dhakira. Tools that let you set a raw API endpoint (Claude Code, aider, Continue, Open Interpreter) work out of the box.
+Not today. Cursor routes API calls through its own servers, so Dhakira on `localhost` is unreachable. Cursor's BYOK mode accepts a custom base URL, but that URL has to be publicly reachable — and Dhakira is designed to stay on `localhost` for privacy. Bridging that gap means exposing Dhakira over the internet (tunnel / VPS), which we don't ship.
 
 **How is this different from Claude's built-in memory?**
-Claude's memory only works within Claude. Dhakira works across every tool that supports custom API endpoints — your memory follows you from Claude Code to aider to whatever you use next. Platform memory is locked in. Yours shouldn't be.
+Claude's memory only works within Claude. Dhakira works across every tool with a custom API endpoint — your memory follows you from Claude Code to aider to whatever you use next. Platform memory is locked in. Yours shouldn't be.
 
 **Does this work with streaming responses?**
 Yes. Dhakira streams responses back to your tool in real-time, byte for byte. Capture happens asynchronously after the stream completes — you never wait for Dhakira.
 
-**Can I contribute?**
-Yes. MIT licensed. PRs welcome.
+**Does Dhakira support Claude Max/Pro subscription users?**
+Yes, as of v0.2.1. `dhakira init` offers a wildcard tool config that lets Claude Code's OAuth bearer pass through to Anthropic untouched. No API key needed.
+
+**Why is the first download so big?**
+Dhakira runs three local models — query expansion (~1.28 GB), embeddings (~333 MB), and reranker (~639 MB). Total ~2.25 GB, one-time. They enable hybrid retrieval without sending a single search query to any cloud service.
+
+## Contributing
+
+Feel free to open an issue or submit a PR. Bug reports and feature requests are welcome.
+
+Keep PRs scoped to one change. Tests live under `test/` and run with `npm test`.
 
 ## License
 

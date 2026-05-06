@@ -4,6 +4,22 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-05-06
+
+Documentation-only release. No code changes.
+
+### Changed
+
+- **README rewritten for accuracy and structure.** Corrected tool wiring examples (`ANTHROPIC_BASE_URL` for Claude Code, `--openai-api-base` for aider, `apiBase` in YAML for Continue.dev). Added explicit Claude Max/Pro subscription setup. Updated disk-space requirement to reflect the actual ~2.25 GB local model footprint. Reworked the secret-filtering section to describe what the 11 patterns actually cover (defense-in-depth, not a security boundary). Honest framing on Cursor compatibility (needs a publicly reachable endpoint; Dhakira is localhost-only). Added explicit note that v2 capture currently covers Anthropic-format traffic while OpenAI-format uses v1, with universal v2 tracked for a future release. Added a Table of Contents, Contributing section, and clearer Requirements list.
+
+### Upgrade
+
+```bash
+npm install -g dhakira@latest
+```
+
+No behavioral changes. Existing wallets and configs remain compatible.
+
 ## [0.2.1] — 2026-05-06
 
 A quality-of-life release focused on onboarding and first-run experience.
