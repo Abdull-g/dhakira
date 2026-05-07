@@ -13,7 +13,6 @@ Dhakira is a local proxy that sits between your AI tools and their APIs. It capt
 
 Your data never leaves your machine. No cloud. No account. Just a folder.
 
-> **v0.2.1** adds Claude Max/Pro subscription support, fixes first-run onboarding, and eliminates the first-prompt freeze while models download. See the [changelog](CHANGELOG.md) for details.
 
 ## Table of Contents
 
