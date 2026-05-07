@@ -4,6 +4,38 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] — 2026-05-07
+
+The OpenAI-format capture release. aider, Continue.dev, Ollama, LM Studio, and any OpenAI-compatible tool now run through the full v2 capture pipeline, same as Claude Code.
+
+### Added
+
+- **OpenAI-format v2 capture adapter.** `ingestOpenAITrace()` parses both non-streaming and streaming `/v1/chat/completions` traffic, including tool_calls, tool results, and multimodal content. All OpenAI-compatible tools now benefit from classifier-driven clean capture, sanitizer rules, and tool-aware turn extraction — same pipeline Anthropic has had since v0.2.0.
+- **`dhakira extract` documented in help.** The manual extraction command now appears in `dhakira help`. Long flag aliases (`-d, --daemon` and `-v, --verbose`) are also shown.
+
+### Changed
+
+- **Default `pipelineVersion` is now `v2`** for both new installs and existing wallets that don't explicitly set `pipelineVersion: v1`. Existing users on v1 will be migrated to v2 automatically unless their config pins v1.
+- **README injection block size** corrected from "~1500 tokens" to "~1800 tokens" (the actual default).
+
+### Fixed
+
+- **`dhakira init` no longer falsely prints "Dhakira is running"** before the server actually starts. The CLI now relies on `main()`'s own accurate listen messages.
+
+### Notes
+
+- The OpenAI v2 adapter promised in v0.2.1's notes (originally planned for v0.2.2) was rescheduled. v0.2.2 shipped as a docs-only release; v0.2.3 was skipped in favor of folding alignment fixes into this release.
+- Chat Completions API (`/v1/chat/completions`) only. The newer Responses API (`/v1/responses`) for o-series reasoning models remains on v1 capture — separate ticket for a future release.
+- aider-specific classifier rules are deferred to v0.2.5. Repo map preamble, file fences, and SEARCH/REPLACE delimiters are documented as TODOs in `src/capture/classifier.ts` and will be addressed once we have real usage corpus to tune against.
+
+### Upgrade
+
+```bash
+npm install -g dhakira@latest
+```
+
+Existing wallets and configs remain compatible. To stay on v1 capture, add `pipelineVersion: v1` under `capture:` in your `~/.dhakira/config.yaml`.
+
 ## [0.2.2] — 2026-05-06
 
 Documentation-only release. No code changes.

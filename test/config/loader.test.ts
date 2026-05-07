@@ -232,12 +232,12 @@ tools:
       expect(result.value.injection.maxTurns).toBe(8)
     })
 
-    it('should default existing configs without capture settings to v1', async () => {
+    it('should default existing configs without capture settings to v2', async () => {
       vi.mocked(fsMock.readFile).mockResolvedValue('incognito: true\n' as never)
       const result = await loadConfig()
       expect(result.ok).toBe(true)
       if (!result.ok) return
-      expect(result.value.capture.pipelineVersion).toBe('v1')
+      expect(result.value.capture.pipelineVersion).toBe('v2')
       expect(result.value.capture.debug).toBe(false)
     })
 

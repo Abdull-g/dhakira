@@ -69,6 +69,14 @@ export const DEFAULT_CLASSIFIER_RULES: ClassifierRules = {
       },
     },
   ],
+  // TODO(v0.2.5): Add aider-repo-map once classifier rules can target system/first-user
+  // boilerplate without dropping real turns. Exact aider marker:
+  // "Here are summaries of some files present in my git repo."
+  // TODO(v0.2.5): Add aider-source-fences once classifier rules can detect pure file-dump
+  // messages. Verified aider fence names: source, code, pre, codeblock, sourcecode.
+  // TODO(v0.2.5): Add aider-search-replace handling via sanitizer (not classifier) —
+  // SEARCH/REPLACE blocks are real content, not intermediate tool noise, so they must be
+  // captured but optionally stripped downstream.
 }
 
 const SKIP_CATEGORIES = new Set<CaptureCategory>([

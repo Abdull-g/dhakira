@@ -93,11 +93,10 @@ function mergeWithDefaults(raw: unknown): WalletConfig {
     },
     tools: parseTools(raw.tools),
     capture: {
-      pipelineVersion: captureRaw.pipelineVersion === 'v2' ? 'v2' : 'v1',
+      pipelineVersion: captureRaw.pipelineVersion === 'v1' ? 'v1' : 'v2',
       debug: getBoolean(captureRaw.debug, d.capture.debug),
     },
     extraction: {
-      schedule: getString(extractionRaw.schedule, d.extraction.schedule),
       model: getString(extractionRaw.model, d.extraction.model),
       apiKey: resolveEnvKey(getString(extractionRaw.apiKey, d.extraction.apiKey)),
       baseUrl: getString(extractionRaw.baseUrl, d.extraction.baseUrl),

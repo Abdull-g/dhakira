@@ -358,16 +358,17 @@ function printHelp(): void {
     ${cmd} [command]
 
   ${c.bold('Commands:')}
-    ${c.cyan('init')}       Set up Dhakira for the first time
+    ${c.cyan('init')}       Set up Dhakira (API key or Claude Max/Pro subscription)
     ${c.cyan('start')}      Start the proxy and dashboard
     ${c.cyan('stop')}       Stop a running Dhakira instance
     ${c.cyan('status')}     Show current status and statistics
+    ${c.cyan('extract')}    Regenerate your profile from captured conversations
     ${c.cyan('reset')}      Delete your wallet and start fresh
     ${c.cyan('help')}       Show this help message
 
   ${c.bold('Options:')}
-    start -d   Run in background (daemon mode)
-    start -v   Show verbose injection details
+    start -d, --daemon   Run in background (daemon mode)
+    start -v, --verbose  Show verbose injection details
 ${installTip}
   ${c.dim('Docs: https://github.com/Abdull-g/dhakira')}
 `)
@@ -500,8 +501,6 @@ async function commandInit(): Promise<void> {
     return
   }
   const config = configResult.value
-
-  console.log(`  ${c.green('✓')} Dhakira is running ${c.dim(`(localhost:${config.proxy.port})`)}`)
 
   const hasLocal = detectedLocal.length > 0
   const hasCloud = detected.length > 0
@@ -767,7 +766,6 @@ async function run(): Promise<void> {
       await commandReset()
       break
     case 'extract':
-      // Hidden command — not shown in help, but functional
       await commandExtract()
       break
     case 'help':

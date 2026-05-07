@@ -6,7 +6,12 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { QMDStore } from '@tobilu/qmd'
 import { classifyConversation } from './capture/classifier.js'
-import { ingestAnthropicTrace, type ContentBlock, type TraceMessage } from './capture/ingest.js'
+import {
+  type ContentBlock,
+  ingestAnthropicTrace,
+  ingestOpenAITrace,
+  type TraceMessage,
+} from './capture/ingest.js'
 import { applyQualityGate } from './capture/quality-gate.js'
 import { sanitizeTrace } from './capture/sanitizer.js'
 import {
@@ -255,8 +260,9 @@ export async function captureConversationOnce(
   config: WalletConfig,
   store: QMDStore,
 ): Promise<void> {
-  if (config.capture.pipelineVersion === 'v2' && normalized.provider === 'anthropic') {
-    const traceResult = ingestAnthropicTrace({
+  if (config.capture.pipelineVersion === 'v2') {
+    const ingest = normalized.provider === 'anthropic' ? ingestAnthropicTrace : ingestOpenAITrace
+    const traceResult = ingest({
       requestBody: normalized.rawBody,
       responseBody,
       sourceTool: normalized.tool,

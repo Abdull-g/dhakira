@@ -104,7 +104,7 @@ Dhakira auto-detects whether a request is in Anthropic or OpenAI format based on
 
 ## What Gets Injected
 
-Dhakira appends a small context block (~1500 tokens) to the end of your tool's system prompt. The block looks like this:
+Dhakira appends a small context block (~1800 tokens) to the end of your tool's system prompt. The block looks like this:
 
 ```text
 <dhakira_context>
@@ -251,9 +251,9 @@ Wildcard tools pass the caller's original auth headers through untouched. This i
 
 ### Capture Pipeline
 
-New installs use the v2 capture pipeline for Anthropic-format traffic (Claude Code). It runs a classifier, sanitizer, tool-aware extractor, and quality gate so your wallet stores clean per-turn memories instead of harness boilerplate.
+New installs use the v2 capture pipeline. It runs a classifier, sanitizer, tool-aware extractor, and quality gate so your wallet stores clean per-turn memories instead of harness boilerplate.
 
-OpenAI-format traffic (aider, Continue, Ollama) uses the simpler v1 pipeline today. Extending v2 to OpenAI is on the roadmap for v0.2.2.
+v2 capture runs for both Anthropic-format traffic (Claude Code) and OpenAI-format traffic (aider, Continue.dev, Ollama, LM Studio, any OpenAI-compatible tool). Classifier rules for each tool family are tuned over time based on real usage.
 
 Switch behavior with:
 

@@ -24,8 +24,6 @@ export interface WalletConfig {
   }
 
   extraction: {
-    /** Cron expression for extraction schedule */
-    schedule: string
     /** Model to use for extraction */
     model: string
     /** API key for extraction LLM (can use env: prefix) */

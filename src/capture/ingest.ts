@@ -46,6 +46,12 @@ interface SseContentBuilder {
   inputJson: string
 }
 
+interface OpenAIToolCallBuilder {
+  id: string
+  name: string
+  argumentsJson: string
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -71,6 +77,22 @@ function normalizeTextContent(content: unknown): string {
 
 function normalizeSystem(system: unknown): { prompt: string; messages: TraceMessage[] } {
   const prompt = normalizeTextContent(system)
+  return {
+    prompt,
+    messages:
+      prompt.length > 0 ? [{ role: 'system', content: [{ type: 'text', text: prompt }] }] : [],
+  }
+}
+
+function normalizeOpenAISystem(messages: unknown[]): { prompt: string; messages: TraceMessage[] } {
+  const prompt = messages
+    .flatMap((message) => {
+      if (!isRecord(message) || message.role !== 'system') return []
+      const text = normalizeTextContent(message.content)
+      return text.length > 0 ? [text] : []
+    })
+    .join('\n\n')
+
   return {
     prompt,
     messages:
@@ -116,6 +138,22 @@ function normalizeContentBlocks(content: unknown): ContentBlock[] {
   return []
 }
 
+function normalizeOpenAIContentBlocks(content: unknown): ContentBlock[] {
+  if (typeof content === 'string') return [{ type: 'text', text: content }]
+  if (!Array.isArray(content)) return []
+
+  return content.flatMap((block): ContentBlock[] => {
+    if (!isRecord(block)) return []
+    if (block.type === 'text' && typeof block.text === 'string') {
+      return [{ type: 'text', text: block.text }]
+    }
+    if (block.type === 'image_url' && 'image_url' in block) {
+      return [{ type: 'image', source: block.image_url }]
+    }
+    return []
+  })
+}
+
 function normalizeRequestMessages(messages: unknown): TraceMessage[] {
   if (!Array.isArray(messages)) return []
 
@@ -132,6 +170,58 @@ function normalizeRequestMessages(messages: unknown): TraceMessage[] {
   })
 }
 
+function normalizeOpenAIRequestMessages(messages: unknown[]): TraceMessage[] {
+  return messages.flatMap((message): TraceMessage[] => {
+    if (!isRecord(message) || message.role === 'system') return []
+
+    if (message.role === 'user') {
+      return [{ role: 'user', content: normalizeOpenAIContentBlocks(message.content) }]
+    }
+
+    if (message.role === 'assistant') {
+      const content = [
+        ...normalizeOpenAIContentBlocks(message.content),
+        ...normalizeOpenAIToolCalls(message.tool_calls),
+      ]
+      return [{ role: 'assistant', content }]
+    }
+
+    if (message.role === 'tool') {
+      return [
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool_result',
+              toolUseId: typeof message.tool_call_id === 'string' ? message.tool_call_id : '',
+              content: normalizeTextContent(message.content),
+            },
+          ],
+        },
+      ]
+    }
+
+    return []
+  })
+}
+
+function normalizeOpenAIToolCalls(toolCalls: unknown): ContentBlock[] {
+  if (!Array.isArray(toolCalls)) return []
+
+  return toolCalls.flatMap((toolCall): ContentBlock[] => {
+    if (!isRecord(toolCall) || !isRecord(toolCall.function)) return []
+    const args = toolCall.function.arguments
+    return [
+      {
+        type: 'tool_use',
+        id: typeof toolCall.id === 'string' ? toolCall.id : '',
+        name: typeof toolCall.function.name === 'string' ? toolCall.function.name : '',
+        input: typeof args === 'string' ? parseToolInput(args) : {},
+      },
+    ]
+  })
+}
+
 function parseRawResponse(responseBody: Buffer | string | null): unknown {
   if (responseBody === null) return null
   const text = Buffer.isBuffer(responseBody) ? responseBody.toString('utf8') : responseBody
@@ -145,7 +235,7 @@ function parseRawResponse(responseBody: Buffer | string | null): unknown {
   }
 }
 
-function parseAnthropicSseText(text: string): unknown[] {
+function parseSseText(text: string): unknown[] {
   const events: unknown[] = []
   for (const line of text.split('\n')) {
     if (!line.startsWith('data: ')) continue
@@ -153,11 +243,42 @@ function parseAnthropicSseText(text: string): unknown[] {
     if (payload.length === 0 || payload === '[DONE]') continue
     try {
       events.push(JSON.parse(payload) as unknown)
-    } catch {
-      continue
-    }
+    } catch {}
   }
   return events
+}
+
+function parseAnthropicSseText(text: string): unknown[] {
+  return parseSseText(text)
+}
+
+function parseOpenAISseText(text: string): unknown[] {
+  return parseSseText(text)
+}
+
+function parseOpenAIRawResponse(responseBody: Buffer | string | null): unknown {
+  if (responseBody === null) return null
+  const text = Buffer.isBuffer(responseBody) ? responseBody.toString('utf8') : responseBody
+  if (text.trim().length === 0) return null
+  const sseEvents = parseOpenAISseText(text)
+  if (sseEvents.length > 0) return coalesceOpenAISseEvents(sseEvents)
+  try {
+    return normalizeOpenAIResponse(JSON.parse(text) as unknown)
+  } catch {
+    return text
+  }
+}
+
+function normalizeOpenAIResponse(rawResponse: unknown): unknown {
+  if (!isRecord(rawResponse) || !Array.isArray(rawResponse.choices)) return rawResponse
+  const [choice] = rawResponse.choices
+  if (!isRecord(choice) || !isRecord(choice.message)) return rawResponse
+
+  const content = [
+    ...normalizeOpenAIContentBlocks(choice.message.content),
+    ...normalizeOpenAIToolCalls(choice.message.tool_calls),
+  ]
+  return { role: 'assistant', content }
 }
 
 function normalizeResponseMessage(rawResponse: unknown): TraceMessage | null {
@@ -180,6 +301,78 @@ export function coalesceAnthropicSseEvents(events: unknown[]): Record<string, un
     content: [...builders.entries()]
       .sort(([a], [b]) => a - b)
       .flatMap(([, builder]) => buildContentBlock(builder)),
+  }
+}
+
+export function coalesceOpenAISseEvents(events: unknown[]): Record<string, unknown> {
+  let text = ''
+  const toolCallBuilders = new Map<number, OpenAIToolCallBuilder>()
+
+  for (const event of events) {
+    const delta = getOpenAIDelta(event)
+    if (delta === null) continue
+    text += getOpenAIContentDelta(delta)
+    appendOpenAIToolCallDeltas(toolCallBuilders, delta.tool_calls)
+  }
+
+  return {
+    role: 'assistant',
+    content: [
+      ...(text.length > 0 ? [{ type: 'text' as const, text }] : []),
+      ...[...toolCallBuilders.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, builder]) => ({
+          type: 'tool_use' as const,
+          id: builder.id,
+          name: builder.name,
+          input: parseToolInput(builder.argumentsJson),
+        })),
+    ],
+  }
+}
+
+function getOpenAIDelta(event: unknown): Record<string, unknown> | null {
+  if (!isRecord(event) || !Array.isArray(event.choices)) return null
+  const [choice] = event.choices
+  if (!isRecord(choice) || !isRecord(choice.delta)) return null
+  return choice.delta
+}
+
+function getOpenAIContentDelta(delta: Record<string, unknown>): string {
+  return typeof delta.content === 'string' ? delta.content : ''
+}
+
+function appendOpenAIToolCallDeltas(
+  builders: Map<number, OpenAIToolCallBuilder>,
+  toolCalls: unknown,
+): void {
+  if (!Array.isArray(toolCalls)) return
+  for (const entry of toolCalls) {
+    appendOpenAIToolCallDelta(builders, entry)
+  }
+}
+
+function appendOpenAIToolCallDelta(
+  builders: Map<number, OpenAIToolCallBuilder>,
+  entry: unknown,
+): void {
+  if (!isRecord(entry) || typeof entry.index !== 'number') return
+  const builder = builders.get(entry.index) ?? {
+    id: '',
+    name: '',
+    argumentsJson: '',
+  }
+
+  if (typeof entry.id === 'string') builder.id = entry.id
+  appendOpenAIFunctionDelta(builder, entry.function)
+  builders.set(entry.index, builder)
+}
+
+function appendOpenAIFunctionDelta(builder: OpenAIToolCallBuilder, value: unknown): void {
+  if (!isRecord(value)) return
+  if (typeof value.name === 'string') builder.name = value.name
+  if (typeof value.arguments === 'string') {
+    builder.argumentsJson += value.arguments
   }
 }
 
@@ -261,6 +454,47 @@ export function ingestAnthropicTrace(input: IngestInput): Result<ConversationTra
     : parseRawResponse(input.responseBody)
   const responseMessage = normalizeResponseMessage(rawResponse)
   const requestMessages = normalizeRequestMessages(request.messages)
+  const messages =
+    responseMessage === null
+      ? [...system.messages, ...requestMessages]
+      : [...system.messages, ...requestMessages, responseMessage]
+
+  return {
+    ok: true,
+    value: {
+      messages,
+      systemPromptHash: hashSystemPrompt(system.prompt),
+      systemPrompt: system.prompt,
+      model: request.model,
+      maxTokens: typeof request.max_tokens === 'number' ? request.max_tokens : 0,
+      streamResponse: request.stream === true,
+      responseMessageIndex: responseMessage === null ? undefined : messages.length - 1,
+      rawRequest: request,
+      rawResponse,
+      sourceTool: input.sourceTool,
+    },
+  }
+}
+
+export function ingestOpenAITrace(input: IngestInput): Result<ConversationTrace> {
+  const request = input.requestBody
+  if (!isRecord(request)) {
+    return { ok: false, error: new Error('Invalid OpenAI request: expected object body') }
+  }
+
+  if (typeof request.model !== 'string' || !Array.isArray(request.messages)) {
+    return {
+      ok: false,
+      error: new Error('Invalid OpenAI request: missing model or messages'),
+    }
+  }
+
+  const system = normalizeOpenAISystem(request.messages)
+  const rawResponse = Array.isArray(input.responseSseEvents)
+    ? coalesceOpenAISseEvents(input.responseSseEvents)
+    : parseOpenAIRawResponse(input.responseBody)
+  const responseMessage = normalizeResponseMessage(rawResponse)
+  const requestMessages = normalizeOpenAIRequestMessages(request.messages)
   const messages =
     responseMessage === null
       ? [...system.messages, ...requestMessages]
