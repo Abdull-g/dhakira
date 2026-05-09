@@ -24,6 +24,7 @@ import { writeConversation } from './capture/writer.js'
 import { loadConfig } from './config/loader.js'
 import type { WalletConfig } from './config/schema.js'
 import { createDashboardServer } from './dashboard/server.js'
+import { maybeTriggerExtraction } from './extraction/trigger.js'
 import { buildInjectionBlock } from './injection/builder.js'
 import { injectIntoSystemPrompt } from './injection/injector.js'
 import { loadProfile } from './injection/profile.js'
@@ -303,6 +304,8 @@ export async function captureConversationOnce(
         config.walletDir,
         conversation.tool,
       )
+      // Fire-and-forget: capture-driven Layer 2 auto-extract.
+      maybeTriggerExtraction(config.walletDir, store, config).catch(() => {})
       return
     }
 
@@ -356,6 +359,8 @@ export async function captureConversationOnce(
     config.walletDir,
     conversation.tool,
   )
+  // Fire-and-forget: capture-driven Layer 2 auto-extract.
+  maybeTriggerExtraction(config.walletDir, store, config).catch(() => {})
 }
 
 export function createCaptureConversation(
