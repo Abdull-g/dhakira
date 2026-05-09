@@ -30,6 +30,8 @@ export interface TurnPair {
   /** SHA-256 fingerprint of the tool's system prompt (first 12 hex chars).
    *  "default" when no system prompt was present. Used to boost same-project turns. */
   contextFingerprint: string
+  /** True when the turn was explicitly recorded by the user. */
+  userRecorded?: boolean
   /** Non-searchable capture metadata for tool-aware extraction. */
   metadata?: {
     toolsUsed: string[]
@@ -278,6 +280,7 @@ export function formatTurnPair(pair: TurnPair): string {
     `timestamp: ${pair.timestamp}`,
     `turnIndex: ${pair.turnIndex}`,
     `contextFingerprint: ${pair.contextFingerprint}`,
+    ...(pair.userRecorded === undefined ? [] : [`userRecorded: ${pair.userRecorded}`]),
     '---',
   ].join('\n')
 

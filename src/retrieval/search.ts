@@ -14,7 +14,7 @@ import type { TurnSearchOptions, TurnSearchResult } from './types.js'
  * Expects YAML frontmatter followed by ## User / ## Assistant sections.
  * Returns null if the body is malformed or missing required fields.
  */
-function parseTurnPairFromBody(body: string): TurnPair | null {
+export function parseTurnPairFromBody(body: string): TurnPair | null {
   const fmMatch = body.match(/^---\n([\s\S]*?)\n---\n/)
   if (!fmMatch?.[1]) return null
 
@@ -31,6 +31,8 @@ function parseTurnPairFromBody(body: string): TurnPair | null {
   const userMatch = afterFm.match(/## User\n([\s\S]*?)(?=\n## Assistant|$)/)
   const assistantMatch = afterFm.match(/## Assistant\n([\s\S]*)$/)
 
+  const userRecorded = get('userRecorded') === 'true' ? true : undefined
+
   return {
     id,
     sessionId,
@@ -40,6 +42,7 @@ function parseTurnPairFromBody(body: string): TurnPair | null {
     userContent: userMatch?.[1]?.trim() ?? '',
     assistantContent: assistantMatch?.[1]?.trim() ?? '',
     contextFingerprint: get('contextFingerprint') || 'default',
+    ...(userRecorded === undefined ? {} : { userRecorded }),
   }
 }
 
