@@ -7,7 +7,10 @@ import { join } from 'node:path'
 import type { QMDStore } from '@tobilu/qmd'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
+import { recordTurn } from '../capture/record.js'
 import type { WalletConfig } from '../config/schema.js'
+import { runExtraction } from '../extraction/runner.js'
+import { searchTurns } from '../retrieval/search.js'
 import { createLogger } from '../utils/logger.js'
 
 const log = createLogger('dashboard-api')
@@ -120,33 +123,19 @@ async function handleGetProfile(res: ServerResponse, walletDir: string): Promise
   }
 }
 
-async function handlePutProfile(
-  req: IncomingMessage,
-  res: ServerResponse,
-  walletDir: string,
-): Promise<void> {
-  try {
-    const body = await readBody(req)
-    const parsed = JSON.parse(body) as { content?: unknown }
-    if (typeof parsed.content !== 'string') {
-      sendJson(res, 400, { error: 'content must be a string' })
-      return
-    }
-    await mkdir(walletDir, { recursive: true })
-    await writeFile(join(walletDir, 'profile.md'), parsed.content, 'utf8')
-    sendJson(res, 200, { ok: true })
-  } catch {
-    sendJson(res, 400, { error: 'Invalid request body' })
-  }
-}
-
-async function getTurnStats(
-  walletDir: string,
-): Promise<{ turnCount: number; sessionCount: number; lastCaptureAt: string | null }> {
+async function getTurnStats(walletDir: string): Promise<{
+  turnCount: number
+  sessionCount: number
+  lastCaptureAt: string | null
+  userRecordsCount: number
+}> {
   const turnsDir = join(walletDir, 'turns')
   try {
     const entries = (await readdir(turnsDir, { recursive: true })) as string[]
     const turnFiles = entries.filter((f) => String(f).endsWith('.md'))
+    const userRecordsCount = turnFiles.filter((f) =>
+      /^user-records-\d+\.md$/.test(String(f).split('/').pop() ?? String(f)),
+    ).length
 
     const sessionIds = new Set<string>()
     for (const file of turnFiles) {
@@ -171,14 +160,30 @@ async function getTurnStats(
       // no date dirs yet
     }
 
-    return { turnCount: turnFiles.length, sessionCount: sessionIds.size, lastCaptureAt }
+    return {
+      turnCount: turnFiles.length,
+      sessionCount: sessionIds.size,
+      lastCaptureAt,
+      userRecordsCount,
+    }
   } catch {
-    return { turnCount: 0, sessionCount: 0, lastCaptureAt: null }
+    return { turnCount: 0, sessionCount: 0, lastCaptureAt: null, userRecordsCount: 0 }
+  }
+}
+
+async function getLastExtractionAt(walletDir: string): Promise<string | null> {
+  try {
+    const raw = await readFile(join(walletDir, '.extraction-state.json'), 'utf8')
+    const parsed = JSON.parse(raw) as { lastRunAt?: unknown }
+    return typeof parsed.lastRunAt === 'string' ? parsed.lastRunAt : null
+  } catch {
+    return null
   }
 }
 
 async function handleGetStatus(res: ServerResponse, config: WalletConfig): Promise<void> {
-  const { turnCount, sessionCount, lastCaptureAt } = await getTurnStats(config.walletDir)
+  const [{ turnCount, sessionCount, lastCaptureAt, userRecordsCount }, lastExtractionAt] =
+    await Promise.all([getTurnStats(config.walletDir), getLastExtractionAt(config.walletDir)])
   sendJson(res, 200, {
     walletDir: config.walletDir,
     incognito: config.incognito,
@@ -186,7 +191,78 @@ async function handleGetStatus(res: ServerResponse, config: WalletConfig): Promi
     turnCount,
     sessionCount,
     lastCaptureAt,
+    userRecordsCount,
+    lastExtractionAt,
   })
+}
+
+async function handlePostRecord(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ApiDeps,
+): Promise<void> {
+  try {
+    const body = await readBody(req)
+    const parsed = JSON.parse(body) as { content?: unknown }
+    if (typeof parsed.content !== 'string') {
+      sendJson(res, 400, { ok: false, error: 'content must be a string' })
+      return
+    }
+
+    if (parsed.content.trim().length === 0) {
+      sendJson(res, 400, { ok: false, error: 'content must be non-empty' })
+      return
+    }
+
+    if (parsed.content.length > 10_000) {
+      sendJson(res, 400, { ok: false, error: 'content exceeds 10000 chars' })
+      return
+    }
+
+    const result = await recordTurn(deps.config.walletDir, parsed.content, { store: deps.store })
+    if (!result.ok) {
+      sendJson(res, 400, { ok: false, error: result.error.message })
+      return
+    }
+
+    sendJson(res, 200, { ok: true, turnPair: result.value })
+  } catch {
+    sendJson(res, 400, { ok: false, error: 'Invalid request body' })
+  }
+}
+
+async function handleSearch(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ApiDeps,
+): Promise<void> {
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  const query = (url.searchParams.get('q') ?? '').trim()
+  if (query.length === 0) {
+    sendJson(res, 400, { error: 'q parameter is required' })
+    return
+  }
+
+  const parsedLimit = Number.parseInt(url.searchParams.get('limit') ?? '', 10)
+  const limit = Number.isNaN(parsedLimit) ? 10 : Math.min(50, Math.max(1, parsedLimit))
+  const result = await searchTurns(deps.store, { query, limit })
+  if (!result.ok) {
+    log.error('Dashboard search failed', { error: result.error.message })
+    sendJson(res, 500, { error: result.error.message })
+    return
+  }
+
+  sendJson(res, 200, { results: result.value })
+}
+
+async function handlePostExtract(res: ServerResponse, deps: ApiDeps): Promise<void> {
+  const result = await runExtraction(deps.config.walletDir, deps.store, deps.config.extraction)
+  if (!result.ok) {
+    sendJson(res, 500, { ok: false, error: result.error.message })
+    return
+  }
+
+  sendJson(res, 200, { ok: true, stats: result.value })
 }
 
 async function handleToggleIncognito(
@@ -230,15 +306,18 @@ export interface ApiDeps {
 
 type RouteHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>
 
-function buildRoutes(config: WalletConfig): Map<string, RouteHandler> {
+function buildRoutes(deps: ApiDeps): Map<string, RouteHandler> {
   const routes = new Map<string, RouteHandler>()
+  const config = deps.config
   const w = config.walletDir
 
   routes.set('GET /api/turns', (_, res) => handleGetTurns(res, w))
   routes.set('GET /api/profile', (_, res) => handleGetProfile(res, w))
-  routes.set('PUT /api/profile', (req, res) => handlePutProfile(req, res, w))
   routes.set('GET /api/status', (_, res) => handleGetStatus(res, config))
   routes.set('POST /api/incognito', (req, res) => handleToggleIncognito(req, res, config))
+  routes.set('POST /api/record', (req, res) => handlePostRecord(req, res, deps))
+  routes.set('GET /api/search', (req, res) => handleSearch(req, res, deps))
+  routes.set('POST /api/extract', (_, res) => handlePostExtract(res, deps))
 
   return routes
 }
@@ -246,7 +325,7 @@ function buildRoutes(config: WalletConfig): Map<string, RouteHandler> {
 export function createApiHandler(
   deps: ApiDeps,
 ): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
-  const routes = buildRoutes(deps.config)
+  const routes = buildRoutes(deps)
 
   return async (req, res) => {
     const url = (req.url ?? '/').split('?')[0] ?? '/'

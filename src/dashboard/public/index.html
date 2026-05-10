@@ -71,6 +71,18 @@
           </div>
         </div>
 
+        <section class="record-panel">
+          <div class="record-panel-header">
+            <span class="field-label">Add a memory</span>
+            <span class="record-panel-hint">Saved as a user-recorded turn — searchable and injected like any other memory.</span>
+          </div>
+          <div class="record-panel-row">
+            <textarea id="record-input" class="record-input" rows="2" placeholder="e.g. I prefer TypeScript over Python."></textarea>
+            <button type="button" id="record-submit" class="btn btn-primary">Save</button>
+          </div>
+          <span id="record-status" class="record-status"></span>
+        </section>
+
         <div class="filter-bar">
           <div class="search-wrap">
             <svg aria-hidden="true" class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -93,24 +105,26 @@
             <h1>Profile</h1>
             <p class="page-subtitle">Your context, injected into every conversation.</p>
           </div>
-          <button type="button" id="save-profile" class="btn btn-primary">Save</button>
         </div>
-        <div class="profile-layout">
-          <div class="profile-editor-wrap">
-            <label class="field-label">profile.md</label>
-            <textarea id="profile-editor" class="profile-editor" placeholder="## Stable&#10;- Name: Your Name&#10;- Based in: City, Country&#10;&#10;## Active&#10;- Building: ..."></textarea>
+        <section class="profile-readonly">
+          <div class="profile-meta" id="profile-meta">
+            <!-- populated by app.js: "Last updated: ...   ·   Generated from X memories across Y conversations" -->
           </div>
-          <div class="profile-preview-wrap">
-            <label class="field-label">Injection preview</label>
-            <div class="profile-preview">
-              <div class="injection-header">
-                <span class="injection-label">dhakira_context</span>
+          <div class="profile-content">
+            <div id="profile-empty-state" class="empty-state hidden">
+              <div class="empty-state-title">Still learning about you</div>
+              <div class="empty-state-body">
+                Use your AI tools and Dhakira will start understanding your context.
+                Click <strong>Regenerate now</strong> below once you've had some conversations.
               </div>
-              <pre id="profile-preview-text" class="injection-body"></pre>
-              <div class="injection-note">Prepended to every conversation via the proxy.</div>
             </div>
+            <pre id="profile-content-text" class="profile-content-text"></pre>
           </div>
-        </div>
+          <div class="profile-actions">
+            <button type="button" id="regenerate-profile" class="btn btn-primary">Regenerate now</button>
+            <span id="regenerate-status" class="profile-regen-status"></span>
+          </div>
+        </section>
       </section>
 
       <!-- Settings Page -->

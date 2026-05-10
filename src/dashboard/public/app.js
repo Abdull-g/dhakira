@@ -9,6 +9,8 @@ const state = {
   profileContent: '',
   status: null,
   searchQuery: '',
+  searchResults: null,
+  searchTimer: null,
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -82,6 +84,10 @@ function formatDateTime(iso) {
   } catch {
     return iso
   }
+}
+
+function formatRelative(iso) {
+  return formatRelativeTime(iso)
 }
 
 function escapeHtml(str) {
@@ -171,6 +177,7 @@ async function loadTurns() {
   try {
     const turns = await api('GET', '/api/turns')
     state.turns = turns
+    if (state.searchQuery.length < 2) state.searchResults = null
     const badge = document.getElementById('conversations-count')
     badge.textContent = String(turns.length)
     renderTurns()
@@ -190,6 +197,7 @@ async function loadTurns() {
 }
 
 function filteredTurns() {
+  if (state.searchQuery.length >= 2 && state.searchResults !== null) return state.searchResults
   if (!state.searchQuery) return state.turns
   const q = state.searchQuery.toLowerCase()
   return state.turns.filter(
@@ -267,8 +275,31 @@ function renderTurns() {
   })
 }
 
+function scheduleSearch() {
+  if (state.searchTimer) clearTimeout(state.searchTimer)
+
+  if (state.searchQuery.length < 2) {
+    state.searchResults = null
+    renderTurns()
+    return
+  }
+
+  state.searchTimer = setTimeout(async () => {
+    try {
+      const resp = await api(
+        'GET',
+        `/api/search?q=${encodeURIComponent(state.searchQuery)}&limit=20`,
+      )
+      state.searchResults = (resp.results ?? []).map((result) => result.turnPair)
+      renderTurns()
+    } catch {
+      showToast('Search failed. Try again.', 'error')
+    }
+  }, 250)
+}
+
 function openTurnModal(id) {
-  const turn = state.turns.find((t) => t.id === id)
+  const turn = filteredTurns().find((t) => t.id === id) ?? state.turns.find((t) => t.id === id)
   if (!turn) return
   state.selectedTurn = turn
 
@@ -309,29 +340,73 @@ function closeTurnModal() {
 
 async function loadProfile() {
   try {
-    const data = await api('GET', '/api/profile')
-    state.profileContent = data.content || ''
-    const editor = document.getElementById('profile-editor')
-    editor.value = state.profileContent
-    updateProfilePreview(state.profileContent)
+    const [profileResp, statusResp] = await Promise.all([
+      api('GET', '/api/profile'),
+      api('GET', '/api/status'),
+    ])
+    const content = profileResp.content ?? ''
+    state.profileContent = content
+
+    const meta = []
+    if (statusResp.lastExtractionAt) {
+      meta.push(`Last updated: ${formatRelative(statusResp.lastExtractionAt)}`)
+    }
+    meta.push(
+      `Generated from ${statusResp.turnCount} memories across ${statusResp.sessionCount} conversations`,
+    )
+    document.getElementById('profile-meta').textContent = meta.join(' · ')
+
+    const empty = document.getElementById('profile-empty-state')
+    const text = document.getElementById('profile-content-text')
+    if (content.trim().length === 0) {
+      empty.classList.remove('hidden')
+      text.textContent = ''
+    } else {
+      empty.classList.add('hidden')
+      text.textContent = content
+    }
   } catch {
     showToast('Something went wrong. Try again.', 'error')
   }
 }
 
-function updateProfilePreview(content) {
-  const preview = document.getElementById('profile-preview-text')
-  preview.textContent = content || '(empty — no profile set)'
+async function regenerateProfile() {
+  const btn = document.getElementById('regenerate-profile')
+  const statusEl = document.getElementById('regenerate-status')
+  btn.disabled = true
+  statusEl.textContent = 'Regenerating…'
+  try {
+    const resp = await api('POST', '/api/extract', {})
+    if (resp.ok) {
+      statusEl.textContent = `Done · created ${resp.stats.memoriesCreated}, updated ${resp.stats.memoriesUpdated}`
+      await loadProfile()
+    } else {
+      statusEl.textContent = `Failed: ${resp.error}`
+    }
+  } catch (e) {
+    statusEl.textContent = `Failed: ${e.message}`
+  } finally {
+    btn.disabled = false
+  }
 }
 
-async function saveProfile() {
-  const content = document.getElementById('profile-editor').value
+async function recordMemory() {
+  const input = document.getElementById('record-input')
+  const statusEl = document.getElementById('record-status')
+  const content = input.value.trim()
+  if (content.length === 0) return
+  statusEl.textContent = 'Saving…'
   try {
-    await api('PUT', '/api/profile', { content })
-    state.profileContent = content
-    showToast('Saved.', 'success')
-  } catch {
-    showToast('Something went wrong. Try again.', 'error')
+    const resp = await api('POST', '/api/record', { content })
+    if (resp.ok) {
+      input.value = ''
+      statusEl.textContent = `Saved as turn #${resp.turnPair.turnIndex} in user-records.`
+      await loadTurns()
+    } else {
+      statusEl.textContent = `Failed: ${resp.error}`
+    }
+  } catch (e) {
+    statusEl.textContent = `Failed: ${e.message}`
   }
 }
 
@@ -418,8 +493,8 @@ function init() {
 
   // Search
   document.getElementById('search-input').addEventListener('input', (e) => {
-    state.searchQuery = e.target.value
-    renderTurns()
+    state.searchQuery = e.target.value.trim()
+    scheduleSearch()
   })
 
   // / shortcut to focus search
@@ -447,10 +522,10 @@ function init() {
   })
 
   // Profile
-  document.getElementById('save-profile').addEventListener('click', saveProfile)
-  document.getElementById('profile-editor').addEventListener('input', (e) => {
-    updateProfilePreview(e.target.value)
-  })
+  document.getElementById('regenerate-profile').addEventListener('click', regenerateProfile)
+
+  // Record memory
+  document.getElementById('record-submit').addEventListener('click', recordMemory)
 
   // Settings
   document.getElementById('incognito-toggle').addEventListener('change', (e) => {
