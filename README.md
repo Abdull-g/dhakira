@@ -9,14 +9,15 @@
 
 Every AI session starts from zero. Dhakira changes that.
 
-Dhakira is a local proxy that sits between your AI tools and their APIs. It captures your conversations, learns from them, and quietly injects relevant context into future sessions — so every tool you use already knows you.
+Dhakira is a local memory engine for your AI tools. It captures your conversations, learns from them over time, and quietly injects relevant context into future sessions — so every tool you use already knows you.
 
 Your data never leaves your machine. No cloud. No account. Just a folder.
 
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
+- [Install](#install)
+- [Usage](#usage)
 - [Supported Tools](#supported-tools)
 - [How It Works](#how-it-works)
 - [What Gets Injected](#what-gets-injected)
@@ -31,17 +32,26 @@ Your data never leaves your machine. No cloud. No account. Just a folder.
 - [Contributing](#contributing)
 - [License](#license)
 
-## Quick Start
+## Install
 
 ```bash
 npm install -g dhakira
 dhakira init
+```
+
+`dhakira init` detects your API keys (or Claude Max/Pro subscription), writes `~/.dhakira/config.yaml`, and creates your wallet at `~/.dhakira`. Requires Node.js 22+.
+
+On first launch, Dhakira downloads ~2.25 GB of local search models (query expansion, embeddings, reranker). This happens once — a progress line keeps you posted, and the proxy is ready to accept traffic the moment warmup finishes.
+
+## Usage
+
+Start Dhakira:
+
+```bash
 dhakira start
 ```
 
-`init` detects your API keys (or Claude Max/Pro subscription), writes `~/.dhakira/config.yaml`, and creates your wallet. `start` launches the proxy on `localhost:4100` and the dashboard on `localhost:4101`.
-
-On first start, Dhakira downloads ~2.25 GB of local search models (query expansion, embeddings, reranker). This happens once — a progress line keeps you posted, and the proxy is ready to accept traffic the moment warmup finishes.
+The proxy comes up on `localhost:4100` and the dashboard on `localhost:4101`.
 
 Point your AI tool at Dhakira:
 
@@ -59,6 +69,8 @@ export OPENAI_BASE_URL=http://localhost:4100/v1
 
 Start working. After a few sessions, you'll notice your AI remembering things you've told it before — without you repeating yourself.
 
+Want to teach it something explicitly? `dhakira record "I prefer functional patterns, no classes"` and that fact is in your wallet immediately.
+
 ## Supported Tools
 
 | Tool | Setup |
@@ -75,29 +87,30 @@ Start working. After a few sessions, you'll notice your AI remembering things yo
 ## How It Works
 
 ```
-[Your AI Tool] ──→ [Dhakira :4100] ──→ [API Provider]
-                         │                     │
-                    ┌────┴─────┐               │
-                    │ Search   │          stream back
-                    │ relevant │          untouched
-                    │ memories │               │
-                    │ & inject │               │
-                    └────┬─────┘               │
-                         │                     │
-                    ┌────┴─────┐               │
-                    │ Capture  │               │
-                    │ & embed  │               │
-                    │ (async)  │               │
-                    └──────────┘
+[Your AI Tool] ──→ [Dhakira proxy :4100] ──→ [API Provider]
+                          │                         │
+                     ┌────┴─────┐                   │
+                     │ Search   │              stream back
+                     │ relevant │              untouched
+                     │ memories │                   │
+                     │ & inject │                   │
+                     └────┬─────┘                   │
+                          │                         │
+                     ┌────┴─────┐
+                     │ Capture  │   ──→  every 10 turns (first run)
+                     │ & embed  │        every 50 turns (after that)
+                     │ (async)  │        Layer 2 profile synthesis runs
+                     └──────────┘        in the background, locally
 ```
 
 1. Your tool sends a request through Dhakira
-2. Dhakira searches your past conversations for anything relevant to the current query
-3. Relevant context is injected into the system prompt — the AI reads it naturally
+2. Dhakira searches your past conversations for anything relevant to the current query (Layer 1: hybrid retrieval over your captured turns)
+3. Relevant context plus a generated profile (Layer 2: synthesized from your history) is injected into the system prompt
 4. The request goes to the real API, response streams back untouched
 5. After the response, Dhakira captures the conversation and embeds it for future search
+6. Every so often, a background extraction pass updates your profile based on what you've been working on
 
-Everything happens locally. Search uses hybrid retrieval (BM25 + semantic embeddings + reranking) via local GGUF models — no API calls for search or embeddings.
+Everything happens locally. Search uses hybrid retrieval (BM25 + semantic embeddings + reranking) via local GGUF models — no API calls for search, embeddings, or profile synthesis by default.
 
 Dhakira auto-detects whether a request is in Anthropic or OpenAI format based on URL and headers. You don't configure the format — just point your tool at `localhost:4100` (or `:4100/v1` for OpenAI-compatible tools) and it works.
 
@@ -123,7 +136,7 @@ Dhakira appends a small context block (~1800 tokens) to the end of your tool's s
 </dhakira_context>
 ```
 
-The context is different every time — tailored to what you're actually working on. If you're debugging auth, you get auth-related history. If you're designing a schema, you get schema discussions.
+The "About You" section is your **profile** — synthesized from your history by a local LLM, refreshed automatically as you work. The "Relevant Past Conversations" section is different every time, tailored to what you're actually working on right now. If you're debugging auth, you get auth-related history. If you're designing a schema, you get schema discussions.
 
 Dhakira also knows which project you're in. Conversations from the current project are boosted — but cross-project knowledge still surfaces when it's relevant.
 
@@ -131,7 +144,7 @@ Dhakira also knows which project you're in. Conversations from the current proje
 
 Dhakira works with cloud APIs, but it also works entirely offline with local models.
 
-The memory engine is already 100% local — search, embeddings, and reranking all run on your machine via GGUF models. If you also run your LLM locally, nothing ever touches the internet:
+The memory engine is already 100% local — search, embeddings, reranking, **and profile synthesis** all run on your machine. Profile synthesis uses the same local 1.7B model that already ships for query expansion, in-process, no extra download. If you also run your LLM locally for inference, nothing ever touches the internet:
 
 ```yaml
 # ~/.dhakira/config.yaml
@@ -149,13 +162,64 @@ tools:
 ## CLI
 
 ```
-dhakira init       Set up Dhakira for the first time
-dhakira start      Start the proxy (foreground)
-dhakira start -d   Start in background (daemon)
-dhakira start -v   Verbose — show which memories are injected
-dhakira stop       Stop a running instance
-dhakira status     Show stats
-dhakira reset      Delete your wallet and start fresh
+dhakira init        Set up Dhakira for the first time
+dhakira start       Start the proxy (foreground)
+dhakira start -d    Start in background (daemon)
+dhakira start -v    Verbose — show which memories are injected
+dhakira stop        Stop a running instance
+dhakira status      Show stats
+dhakira record      Save a fact directly to your memory
+dhakira search      Search your captured memories
+dhakira profile     Show your generated memory profile
+dhakira extract     Regenerate your profile from captured conversations
+dhakira reset       Delete your wallet and start fresh
+```
+
+The proxy runs entirely in the background once you've started it — these commands let you talk to your wallet directly, without going through an AI tool.
+
+### Record a memory
+
+Sometimes you want to teach Dhakira something without going through a conversation:
+
+```bash
+$ dhakira record "I'm a TypeScript developer, based in Riyadh"
+✓ Recorded as turn 8f3a2c1d (turn #1 in user-records).
+
+$ dhakira record "I prefer functional patterns over classes"
+✓ Recorded as turn b7e1a9f0 (turn #2 in user-records).
+```
+
+Recorded facts are first-class memories — they get indexed, searched, and pulled into your context block alongside captured conversation turns.
+
+### Search your wallet
+
+```bash
+$ dhakira search "PostgreSQL pooling"
+
+  1. [2026-03-25 · session sess_abc] (score 0.84)
+     You: How should I handle connection pooling in PostgreSQL?
+     → Used pgBouncer with pool_mode=transaction after testing session mode.
+
+  2. [2026-03-12 · session sess_xyz] (score 0.71)
+     You: pgBouncer vs PgPool-II for a small Node.js app?
+     → Picked pgBouncer for its lower memory footprint.
+
+  --limit N to return more (default 5, max 50)
+```
+
+This is the same search that runs during injection — useful for spot-checking what your AI tools are actually getting.
+
+### Profile
+
+```bash
+$ dhakira profile
+```
+
+Prints your generated profile (`~/.dhakira/profile.md`) with a "last updated" timestamp. If you haven't generated one yet:
+
+```
+No profile yet. Still learning about you — keep using your AI tools
+and run `dhakira extract` to generate a profile.
 ```
 
 ### Status
@@ -188,7 +252,11 @@ $ dhakira start -v
 
 ## Dashboard
 
-A minimal web UI at `http://localhost:4101` — browse your captured conversations, view your profile, see what's being injected, and toggle incognito mode.
+A minimal web UI at `http://localhost:4101` — browse captured conversations, see your generated profile, watch what's being injected, and toggle incognito mode.
+
+The Profile page is **read-only** — your profile is built by Dhakira, not edited by hand. The page shows when it was last refreshed, how many memories went into it ("Generated from X memories across Y conversations"), and a "Regenerate now" button if you want to force an update. If you haven't built up enough history yet, you'll see an empty state ("Still learning about you") instead.
+
+You can also record new memories and run searches directly from the dashboard, with the same wiring as the CLI commands above.
 
 No login. No auth. It's localhost.
 
@@ -235,6 +303,14 @@ injection:
   recencyBoost: 0.3       # Favor more recent conversations
   maxTurns: 8             # Max past conversations to inject
 
+extraction:
+  # Profile synthesis defaults to a local 1.7B model — zero API calls.
+  # To use a stronger external model instead, fill these in:
+  # apiKey: env:OPENAI_API_KEY
+  # baseUrl: https://api.openai.com/v1
+  # model: gpt-4o-mini
+  apiKey: ""
+
 capture:
   pipelineVersion: v2      # v2 is used for new installs
   debug: false
@@ -247,6 +323,16 @@ API keys support `env:VAR_NAME` syntax — Dhakira reads from your environment, 
 ### Wildcard matching (`apiKey: "*"`)
 
 Wildcard tools pass the caller's original auth headers through untouched. This is how Claude Code's Max/Pro subscription (OAuth bearer) routes through Dhakira without an API key. `dhakira init` offers to set this up for you when no `ANTHROPIC_API_KEY` is detected.
+
+### Profile synthesis (Layer 2)
+
+Your profile is the "About You" block injected into every prompt. It's built by an LLM that summarizes patterns from your captured turns.
+
+By default, this runs **locally** on a 1.7B model that ships with Dhakira (the same one used for query expansion). No API key, no network calls, no extra download. The trade-off is quality — a 1.7B model gives you a useful profile, but a frontier model gives you a sharper one.
+
+If you want to upgrade, set `extraction.apiKey` (and optionally `extraction.baseUrl` and `extraction.model`) and Dhakira will use that endpoint instead. Anything OpenAI-compatible works.
+
+The synthesis runs automatically in the background — the first pass kicks in after ~10 captured turns, and subsequent refreshes happen every ~50 turns. You can also force a regeneration with `dhakira extract` or the dashboard's "Regenerate now" button.
 
 ### Capture Pipeline
 
@@ -292,7 +378,7 @@ It's just files. Back them up. Sync them. Move them to another machine. Grep the
 - A generated profile (in `profile.md`)
 
 **What Dhakira doesn't do:**
-- Send data anywhere. All storage and search is local.
+- Send data anywhere by default. Storage, search, and profile synthesis are all local. The only network calls Dhakira makes are forwarding your AI requests to whichever provider you configured (and an external profile-synthesis endpoint, if you opt in).
 - Phone home. No telemetry, no analytics, no update checks.
 - Store your API keys in config. Keys use `env:` references.
 - Touch anything outside `~/.dhakira`.
@@ -316,7 +402,7 @@ Toggle in the dashboard or set `incognito: true` in config. Dhakira stops captur
 ## FAQ
 
 **Does Dhakira slow down my AI tool?**
-Search takes 50–400ms depending on your wallet size. Models warm up at `dhakira start`, so your first prompt doesn't wait for a download. After warmup, injection runs in parallel with your request.
+Search takes 50–400ms depending on your wallet size. Models warm up at `dhakira start`, so your first prompt doesn't wait for a download. After warmup, injection runs in parallel with your request. Profile synthesis is async and never blocks a user-facing request.
 
 **What happens if Dhakira is down?**
 Your tool gets "connection refused" on localhost:4100. Either restart Dhakira, or unset `ANTHROPIC_BASE_URL` (or whatever you set) to fall back to the provider directly.
@@ -334,7 +420,10 @@ Yes. Dhakira streams responses back to your tool in real-time, byte for byte. Ca
 Yes, as of v0.2.1. `dhakira init` offers a wildcard tool config that lets Claude Code's OAuth bearer pass through to Anthropic untouched. No API key needed.
 
 **Why is the first download so big?**
-Dhakira runs three local models — query expansion (~1.28 GB), embeddings (~333 MB), and reranker (~639 MB). Total ~2.25 GB, one-time. They enable hybrid retrieval without sending a single search query to any cloud service.
+Dhakira runs three local models — query expansion (~1.28 GB), embeddings (~333 MB), and reranker (~639 MB). Total ~2.25 GB, one-time. They enable hybrid retrieval — and now profile synthesis — without sending a single search query to any cloud service.
+
+**Can I edit my profile by hand?**
+Not through the dashboard, no. The profile is generated from your captured history; editing it manually would just get overwritten on the next refresh. If you want to teach Dhakira something specific, use `dhakira record "..."` — recorded facts are real memories that flow into the profile naturally.
 
 ## Contributing
 

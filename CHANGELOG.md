@@ -4,6 +4,45 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] — 2026-05-10
+
+The Layer 2 + delivery release. Profile synthesis now runs locally by default — no API key, no network calls, no extra download. Three new CLI commands (`record`, `search`, `profile`) let you talk to your wallet directly without going through an AI tool. Dashboard Profile is now read-only and shows what built it.
+
+### Added
+
+- **`dhakira record "fact"`** — save a fact directly to your wallet as a first-class memory. Recorded turns are indexed, searchable, and injected like any other memory. Useful when you want to teach Dhakira something without going through a conversation.
+- **`dhakira search "query"`** — run the same hybrid retrieval that powers injection, against your wallet, from the terminal. Useful for spot-checking what your AI tools are actually getting. `--limit N` (default 5, max 50).
+- **`dhakira profile`** — print your generated profile (`~/.dhakira/profile.md`) with a "last updated" timestamp, plus an empty-state message if you haven't built one yet.
+- **Auto-extract trigger.** Profile synthesis now runs automatically in the background as you capture conversations — first pass after ~10 captured turns, subsequent refreshes every ~50 turns. Single-flight lock with coalesced follow-up so concurrent captures never queue up overlapping extractions.
+- **Local-LLM profile synthesis (default).** Layer 2 (the "About You" block in your injection) now synthesizes on a local 1.7B model that already ships with Dhakira (the same model used for query expansion). No API key, no network, no extra disk. The trade-off is quality — a 1.7B gives you a useful profile; a frontier model gives you a sharper one.
+- **External LLM as opt-in upgrade.** Set `extraction.apiKey` (and optionally `extraction.baseUrl` and `extraction.model`) in `~/.dhakira/config.yaml` to route synthesis through a frontier model instead. Anything OpenAI-compatible works.
+- **Dashboard — record + search panels.** "Record Memory" form and search bar both wired to the same engine functions as the CLI commands.
+- **Dashboard — "Regenerate now" button on Profile.** Force a profile refresh from the UI; same effect as `dhakira extract`.
+- **Dashboard — Profile metadata.** Last-updated timestamp and "Generated from X memories across Y conversations" footer below the profile body.
+- **Dashboard — "Still learning about you" empty state.** Clean placeholder when there isn't enough captured history to synthesize a profile yet.
+- **`POST /api/record`, `GET /api/search`, `POST /api/extract`** — dashboard API endpoints backing the new UI.
+
+### Changed
+
+- **Dashboard Profile is now read-only.** The old free-form textarea is gone. Your profile is built by Dhakira from your captured history; editing it by hand would just get overwritten on the next refresh. Use `dhakira record "..."` if you want to teach Dhakira something specific.
+- **README rewritten.** New CLI commands documented with examples. New `## Profile synthesis (Layer 2)` configuration subsection. New `extraction:` block in the example config. Privacy section clarified to reflect the local-default synthesis path. New FAQ on editing the profile by hand.
+
+### Removed
+
+- **`PUT /api/profile`.** The dashboard no longer writes to the profile, so the endpoint is gone. (Internal cleanup — nothing was using it externally.)
+
+### Notes
+
+- **No proxy or capture-pipeline changes in this release.** v2 capture (Anthropic + OpenAI formats) from v0.2.4 is unchanged. aider classifier rules remain on the v0.2.x backlog.
+
+### Upgrade
+
+```bash
+npm install -g dhakira@latest
+```
+
+Existing wallets and configs remain compatible. If you previously set `extraction.apiKey` to use an external model, your config keeps working unchanged — the local-default path only kicks in when no key is configured.
+
 ## [0.2.4] — 2026-05-07
 
 The OpenAI-format capture release. aider, Continue.dev, Ollama, LM Studio, and any OpenAI-compatible tool now run through the full v2 capture pipeline, same as Claude Code.
