@@ -7,7 +7,6 @@ import type { QMDStore } from '@tobilu/qmd'
 import { parse } from 'yaml'
 
 import type { WalletConfig } from '../config/schema.js'
-import type { Result } from '../proxy/types.js'
 import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
 import { extractFacts } from './extract.js'
@@ -19,6 +18,8 @@ import {
 } from './session-reconstructor.js'
 import type { ExtractedFact, MemoryRecord, UpdateAction } from './types.js'
 import { processUpdates } from './update.js'
+
+type Result<T> = import('../proxy/types.js').Result<T>
 
 export interface ExtractionStats {
   conversationsProcessed: number
@@ -207,6 +208,7 @@ async function processConversation(
     ctx.config,
     fm.id,
     fm.timestamp.split('T')[0],
+    ctx.store,
   )
   if (!extractResult.ok) {
     logger.warn('Extraction failed', { id: fm.id, error: extractResult.error.message })
@@ -416,7 +418,7 @@ export async function runExtraction(
       })
     }
 
-    await regenerateProfile(walletDir, config)
+    await regenerateProfile(walletDir, config, store)
   }
 
   // Save state — only successfully processed IDs are in processedIds

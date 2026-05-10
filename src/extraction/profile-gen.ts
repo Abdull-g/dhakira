@@ -3,13 +3,15 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import type { QMDStore } from '@tobilu/qmd'
 import { parse } from 'yaml'
 
 import type { WalletConfig } from '../config/schema.js'
-import type { Result } from '../proxy/types.js'
 import { createLogger } from '../utils/logger.js'
-import { callLLM, extractContent } from './extract.js'
+import { callExtractionLLM, extractContent } from './extract.js'
 import { fillTemplate, PROFILE_PROMPT } from './prompts.js'
+
+type Result<T> = import('../proxy/types.js').Result<T>
 
 interface MemoryFrontmatter {
   confidence: string
@@ -71,6 +73,7 @@ async function writeProfileFromLLM(
   profilePath: string,
   memories: string[],
   config: WalletConfig['extraction'],
+  store: QMDStore,
 ): Promise<Result<string>> {
   const logger = createLogger('extraction')
   const memoriesText = memories.map((m, i) => `${i + 1}. ${m}`).join('\n')
@@ -78,9 +81,7 @@ async function writeProfileFromLLM(
 
   logger.info('Regenerating profile', { memoryCount: memories.length })
 
-  const llmResult = await callLLM(config.baseUrl, config.apiKey, config.model, [
-    { role: 'user', content: prompt },
-  ])
+  const llmResult = await callExtractionLLM(store, config, [{ role: 'user', content: prompt }])
   if (!llmResult.ok) return llmResult
 
   const contentResult = extractContent(llmResult.value)
@@ -106,6 +107,7 @@ async function writeProfileFromLLM(
 export async function regenerateProfile(
   walletDir: string,
   config: WalletConfig['extraction'],
+  store: QMDStore,
 ): Promise<Result<string>> {
   const logger = createLogger('extraction')
   const profilePath = join(walletDir, 'profile.md')
@@ -128,5 +130,5 @@ export async function regenerateProfile(
     }
   }
 
-  return writeProfileFromLLM(profilePath, memoriesResult.value, config)
+  return writeProfileFromLLM(profilePath, memoriesResult.value, config, store)
 }

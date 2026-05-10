@@ -3,18 +3,21 @@
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 
+import type { QMDStore } from '@tobilu/qmd'
 import type { WalletConfig } from '../config/schema.js'
-import type { Result } from '../proxy/types.js'
 import { createLogger } from '../utils/logger.js'
+import { callLocalLLM } from './local-llm.js'
 import { EXTRACT_PROMPT, fillTemplate } from './prompts.js'
 import type { ExtractedFact, ExtractionResult } from './types.js'
+
+type Result<T> = import('../proxy/types.js').Result<T>
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
 }
 
-interface OpenAIResponse {
+export interface OpenAIResponse {
   choices?: Array<{
     message?: {
       content?: string
@@ -165,6 +168,21 @@ export async function callLLM(
   })
 }
 
+export async function callExtractionLLM(
+  store: QMDStore,
+  config: WalletConfig['extraction'],
+  messages: LLMMessage[],
+  options?: { maxTokens?: number; temperature?: number },
+): Promise<Result<OpenAIResponse>> {
+  const resolved = resolveApiKey(config.apiKey)
+  if (resolved.trim().length > 0) {
+    return callLLM(config.baseUrl, config.apiKey, config.model, messages)
+  }
+
+  // TODO(v0.2.5-tune): Empty API key currently selects local fallback implicitly; consider explicit extraction.provider config.
+  return callLocalLLM(store, messages, options)
+}
+
 /** Extract the text content from an OpenAI response */
 export function extractContent(response: OpenAIResponse): Result<string> {
   if (response.error) {
@@ -235,7 +253,8 @@ export async function extractFacts(
   rollingSummary: string,
   config: WalletConfig['extraction'],
   conversationId: string,
-  conversationDate?: string,
+  conversationDate: string | undefined,
+  store: QMDStore,
 ): Promise<Result<ExtractionResult>> {
   const logger = createLogger('extraction')
 
@@ -248,9 +267,7 @@ export async function extractFacts(
 
   logger.info('Extracting facts', { conversationId })
 
-  const llmResult = await callLLM(config.baseUrl, config.apiKey, config.model, [
-    { role: 'user', content: prompt },
-  ])
+  const llmResult = await callExtractionLLM(store, config, [{ role: 'user', content: prompt }])
 
   if (!llmResult.ok) {
     logger.error('LLM call failed during extraction', {
@@ -269,6 +286,7 @@ export async function extractFacts(
     return contentResult
   }
 
+  // TODO(v0.2.5-tune): Local 1.7B output may need cleanup before strict JSON parsing.
   const parseResult = parseExtractPayload(contentResult.value)
   if (!parseResult.ok) {
     logger.error('Failed to parse extraction response', {

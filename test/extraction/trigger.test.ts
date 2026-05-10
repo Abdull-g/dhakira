@@ -204,7 +204,7 @@ describe('maybeTriggerExtraction', () => {
     expect(runExtractionMock).toHaveBeenCalledTimes(2)
   })
 
-  it('no-op when extraction.apiKey resolves empty', async () => {
+  it('fires extraction even when extraction.apiKey is empty', async () => {
     const { maybeTriggerExtraction } = await loadTrigger()
     const config = makeConfig({ apiKey: '' })
     const store = makeStore()
@@ -212,27 +212,15 @@ describe('maybeTriggerExtraction', () => {
     for (let i = 0; i < 10; i++) {
       await maybeTriggerExtraction(walletDir, store, config)
     }
-    expect(runExtractionMock).not.toHaveBeenCalled()
-    expect(warnMock).toHaveBeenCalledTimes(1)
-
-    for (let i = 0; i < 20; i++) {
-      await maybeTriggerExtraction(walletDir, store, config)
-    }
-    expect(runExtractionMock).not.toHaveBeenCalled()
-    expect(warnMock).toHaveBeenCalledTimes(1)
+    expect(runExtractionMock).toHaveBeenCalledTimes(1)
+    expect(warnMock).not.toHaveBeenCalled()
   })
 
-  it('env: prefix resolves correctly', async () => {
+  it('env: prefix resolution is handled by callExtractionLLM, not the trigger', async () => {
     const { maybeTriggerExtraction } = await loadTrigger()
     const config = makeConfig({ apiKey: 'env:FAKE_KEY' })
     const store = makeStore()
 
-    for (let i = 0; i < 10; i++) {
-      await maybeTriggerExtraction(walletDir, store, config)
-    }
-    expect(runExtractionMock).not.toHaveBeenCalled()
-
-    process.env.FAKE_KEY = 'real'
     for (let i = 0; i < 10; i++) {
       await maybeTriggerExtraction(walletDir, store, config)
     }
@@ -245,9 +233,9 @@ describe('maybeTriggerExtraction', () => {
     const config = makeConfig()
     const store = makeStore()
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 50; i++) {
       await expect(maybeTriggerExtraction(walletDir, store, config)).resolves.toBeUndefined()
     }
-    expect(runExtractionMock).toHaveBeenCalledTimes(1)
+    expect(runExtractionMock).toHaveBeenCalled()
   })
 })

@@ -10,16 +10,11 @@ import { runExtraction } from './runner.js'
 const STATE_FILE = '.extraction-state.json'
 const FIRST_RUN_THRESHOLD = 10
 const SUBSEQUENT_RUN_THRESHOLD = 50
-const DEFAULT_EXTRACTION_BASE_URLS = new Set([
-  'https://api.openai.com/v1',
-  'https://api.anthropic.com',
-])
 
 let capturedSinceLastTrigger = 0
 let cachedLastRunAt: string | null | undefined
 let isExtractionRunning = false
 let pendingFollowUp = false
-let warnedMissingExtractionConfig = false
 
 interface ExtractionState {
   lastRunAt: string | null
@@ -49,11 +44,6 @@ export async function maybeTriggerExtraction(
   if (capturedSinceLastTrigger < threshold) return
 
   capturedSinceLastTrigger = 0
-
-  if (shouldNoopForMissingExtractionConfig(config.extraction)) {
-    warnMissingExtractionConfigOnce()
-    return
-  }
 
   await runExtractionWithLock(walletDir, store, config)
 }
@@ -96,25 +86,4 @@ async function runExtractionWithLock(
       await runExtractionWithLock(walletDir, store, config)
     }
   }
-}
-
-function shouldNoopForMissingExtractionConfig(config: WalletConfig['extraction']): boolean {
-  return (
-    resolveApiKey(config.apiKey).trim().length === 0 &&
-    DEFAULT_EXTRACTION_BASE_URLS.has(config.baseUrl)
-  )
-}
-
-function resolveApiKey(apiKey: string): string {
-  if (!apiKey.startsWith('env:')) return apiKey
-  return process.env[apiKey.slice(4)] ?? ''
-}
-
-function warnMissingExtractionConfigOnce(): void {
-  if (warnedMissingExtractionConfig) return
-
-  warnedMissingExtractionConfig = true
-  createLogger('extraction:trigger').warn(
-    'Auto-extraction skipped: no extraction API key configured',
-  )
 }

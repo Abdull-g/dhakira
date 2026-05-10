@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { ClientRequest } from 'node:http'
+import type { QMDStore } from '@tobilu/qmd'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock HTTP modules before importing the module under test
@@ -65,6 +66,13 @@ const BASE_CONFIG = {
   model: 'gpt-4o-mini',
   apiKey: 'test-key',
   baseUrl: 'https://api.openai.com/v1',
+}
+
+function makeStore(): QMDStore {
+  return {
+    internal: {} as never,
+    dbPath: '/tmp/test.sqlite',
+  } as unknown as QMDStore
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +230,10 @@ That's great! Go is a solid choice for backend systems.
 ## User
 I prefer PostgreSQL over MySQL for databases.`
 
+  function extractConversation() {
+    return extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123', undefined, makeStore())
+  }
+
   it('returns extracted facts on a valid LLM response', async () => {
     const llmPayload = JSON.stringify({
       facts: [
@@ -237,7 +249,7 @@ I prefer PostgreSQL over MySQL for databases.`
 
     mockHttpsRequest({ body: makeOpenAIResponse(llmPayload) })
 
-    const result = await extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123')
+    const result = await extractConversation()
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -255,7 +267,7 @@ I prefer PostgreSQL over MySQL for databases.`
     })
     mockHttpsRequest({ body: makeOpenAIResponse(llmPayload) })
 
-    const result = await extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123')
+    const result = await extractConversation()
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -272,7 +284,7 @@ I prefer PostgreSQL over MySQL for databases.`
     })
     mockHttpsRequest({ body: makeOpenAIResponse(llmPayload) })
 
-    const result = await extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123')
+    const result = await extractConversation()
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -287,7 +299,7 @@ I prefer PostgreSQL over MySQL for databases.`
     })
     mockHttpsRequest({ body: makeOpenAIResponse(llmPayload) })
 
-    const result = await extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123')
+    const result = await extractConversation()
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -297,14 +309,14 @@ I prefer PostgreSQL over MySQL for databases.`
   it('returns ok: false when the LLM call fails', async () => {
     mockHttpsRequest({ body: 'not-json' })
 
-    const result = await extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123')
+    const result = await extractConversation()
     expect(result.ok).toBe(false)
   })
 
   it('returns ok: false when the LLM response JSON is malformed', async () => {
     mockHttpsRequest({ body: makeOpenAIResponse('{"wrong":"shape"}') })
 
-    const result = await extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123')
+    const result = await extractConversation()
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.message).toMatch(/facts array/)
@@ -314,7 +326,15 @@ I prefer PostgreSQL over MySQL for databases.`
     const llmPayload = JSON.stringify({ facts: [], summary_update: 'none' })
     mockHttpsRequest({ body: makeOpenAIResponse(llmPayload) })
 
-    await extractFacts(CONVERSATION, 'Name: Alice', 'Previously discussed Go.', BASE_CONFIG, 'c1')
+    await extractFacts(
+      CONVERSATION,
+      'Name: Alice',
+      'Previously discussed Go.',
+      BASE_CONFIG,
+      'c1',
+      undefined,
+      makeStore(),
+    )
 
     // Verify the LLM was called — the profile is baked into the request body
     // written via req.write(), which we can confirm by checking the request was made
