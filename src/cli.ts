@@ -6,6 +6,7 @@ import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/p
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+import { pathToFileURL } from 'node:url'
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -362,6 +363,9 @@ function printHelp(): void {
     ${c.cyan('start')}      Start the proxy and dashboard
     ${c.cyan('stop')}       Stop a running Dhakira instance
     ${c.cyan('status')}     Show current status and statistics
+    ${c.cyan('profile')}    Show your generated memory profile
+    ${c.cyan('record')}     Save a fact to your memory ("dhakira record "fact"")
+    ${c.cyan('search')}     Search your captured memories ("dhakira search "query"")
     ${c.cyan('extract')}    Regenerate your profile from captured conversations
     ${c.cyan('reset')}      Delete your wallet and start fresh
     ${c.cyan('help')}       Show this help message
@@ -741,6 +745,152 @@ ${c.dim('───────────────────────�
 `)
 }
 
+function joinPositional(args: string[]): string {
+  return args.join(' ').trim()
+}
+
+export async function commandRecord(args: string[]): Promise<void> {
+  const factText = joinPositional(args)
+  if (factText.length === 0) {
+    console.error(c.red('Usage: dhakira record "your fact here"'))
+    process.exit(1)
+  }
+
+  const { loadConfig } = await import('./config/loader.js')
+  const configResult = await loadConfig()
+  if (!configResult.ok) {
+    console.error(c.red(`Failed to load config: ${configResult.error.message}`))
+    process.exit(1)
+  }
+
+  const { recordTurn } = await import('./capture/record.js')
+  const result = await recordTurn(configResult.value.walletDir, factText)
+  if (!result.ok) {
+    console.error(c.red(`Record failed: ${result.error.message}`))
+    process.exit(1)
+  }
+
+  const turnPair = result.value
+  console.log(
+    `✓ Recorded as turn ${turnPair.id.slice(-8)} (turn #${turnPair.turnIndex} in user-records).`,
+  )
+}
+
+function parseSearchArgs(args: string[]): { query: string; limit: number } {
+  const positional: string[] = []
+  let limit = 5
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === '--limit') {
+      const parsed = Number.parseInt(args[i + 1] ?? '', 10)
+      if (!Number.isNaN(parsed)) limit = Math.min(50, Math.max(1, parsed))
+      i++
+      continue
+    }
+    positional.push(arg)
+  }
+
+  return { query: joinPositional(positional), limit }
+}
+
+function formatSearchTimestamp(timestamp: string): string {
+  const d = new Date(timestamp)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function oneLineSnippet(text: string): string {
+  const singleLine = text.replace(/\s+/g, ' ').trim()
+  return singleLine.length > 200 ? `${singleLine.slice(0, 200).trimEnd()}…` : singleLine
+}
+
+export async function commandSearch(args: string[]): Promise<void> {
+  const { query, limit } = parseSearchArgs(args)
+  if (query.length === 0) {
+    console.error(c.red('Usage: dhakira search "query"'))
+    process.exit(1)
+  }
+
+  const { loadConfig } = await import('./config/loader.js')
+  const configResult = await loadConfig()
+  if (!configResult.ok) {
+    console.error(c.red(`Failed to load config: ${configResult.error.message}`))
+    process.exit(1)
+  }
+
+  const { createWalletStore } = await import('./retrieval/store.js')
+  const storeResult = await createWalletStore(configResult.value.walletDir)
+  if (!storeResult.ok) {
+    console.error(c.red(`Failed to initialize store: ${storeResult.error.message}`))
+    process.exit(1)
+  }
+
+  const store = storeResult.value
+  try {
+    const { searchTurns } = await import('./retrieval/search.js')
+    const result = await searchTurns(store, { query, limit })
+    if (!result.ok) {
+      console.error(c.red(`Search failed: ${result.error.message}`))
+      process.exit(1)
+    }
+
+    if (result.value.length === 0) {
+      console.log(c.dim('No matching turns found.'))
+      return
+    }
+
+    const lines = result.value.map(({ turnPair }) =>
+      [
+        `${c.dim(`[${formatSearchTimestamp(turnPair.timestamp)}]`)} ${c.cyan(turnPair.tool)} · #${turnPair.id.slice(-6)}`,
+        `User: ${oneLineSnippet(turnPair.userContent)}`,
+        `Assistant: ${oneLineSnippet(turnPair.assistantContent)}`,
+      ].join('\n'),
+    )
+    console.log(lines.join('\n\n'))
+  } finally {
+    await store.close()
+  }
+}
+
+export async function commandProfile(): Promise<void> {
+  const { loadConfig } = await import('./config/loader.js')
+  const configResult = await loadConfig()
+  if (!configResult.ok) {
+    console.error(c.red(`Failed to load config: ${configResult.error.message}`))
+    process.exit(1)
+  }
+
+  const walletDir = configResult.value.walletDir
+  const { loadProfile } = await import('./injection/profile.js')
+  const profileResult = await loadProfile(walletDir)
+  if (!profileResult.ok) {
+    console.error(c.red(`Failed to load profile: ${profileResult.error.message}`))
+    process.exit(1)
+  }
+
+  const profile = profileResult.value
+  if (profile.trim().length === 0) {
+    console.log(
+      c.dim(
+        'No profile yet. Still learning about you — keep using your AI tools and run `dhakira extract` to generate a profile.',
+      ),
+    )
+    return
+  }
+
+  const profilePath = join(walletDir, 'profile.md')
+  console.log(`${c.bold('Profile')} ${c.dim(`(${profilePath})`)}\n`)
+  console.log(profile)
+
+  try {
+    const s = await stat(profilePath)
+    console.log(c.dim(`Last updated: ${relativeTime(s.mtime)}`))
+  } catch {
+    // Missing stat is fine; loadProfile already handled missing-file semantics.
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -762,6 +912,15 @@ async function run(): Promise<void> {
     case 'status':
       await commandStatus()
       break
+    case 'record':
+      await commandRecord(args)
+      break
+    case 'search':
+      await commandSearch(args)
+      break
+    case 'profile':
+      await commandProfile()
+      break
     case 'reset':
       await commandReset()
       break
@@ -780,7 +939,9 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err: unknown) => {
-  console.error(c.red(`Fatal: ${String(err)}`))
-  process.exit(1)
-})
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  run().catch((err: unknown) => {
+    console.error(c.red(`Fatal: ${String(err)}`))
+    process.exit(1)
+  })
+}
