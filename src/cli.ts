@@ -2,6 +2,7 @@
 // CLI entry point — dhakira init|start|stop|status|reset|extract|help
 
 import { spawn } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
@@ -939,7 +940,14 @@ async function run(): Promise<void> {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+let entryPath = process.argv[1] ?? ''
+try {
+  entryPath = realpathSync(entryPath)
+} catch {
+  // Fall back to argv[1] for unusual launchers where the entry path is not on disk.
+}
+
+if (import.meta.url === pathToFileURL(entryPath).href) {
   run().catch((err: unknown) => {
     console.error(c.red(`Fatal: ${String(err)}`))
     process.exit(1)

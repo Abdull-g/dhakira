@@ -4,6 +4,10 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5.1] - 2026-05-12
+
+- Fixed: CLI silently exited with no output when installed via npm install -g due to a symlink-resolution bug in the entry-point guard. The CLI now correctly resolves through the npm-created symlink. Affects every npm-installed user of v0.2.5; v0.2.5.1 is required.
+
 ## [0.2.5] — 2026-05-10
 
 The Layer 2 + delivery release. Profile synthesis now runs locally by default — no API key, no network calls, no extra download. Three new CLI commands (`record`, `search`, `profile`) let you talk to your wallet directly without going through an AI tool. Dashboard Profile is now read-only and shows what built it.
