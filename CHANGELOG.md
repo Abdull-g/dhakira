@@ -4,7 +4,7 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.5.1] - 2026-05-12
+## [0.2.6] - 2026-05-12
 
 - Fixed: CLI silently exited with no output when installed via npm install -g due to a symlink-resolution bug in the entry-point guard. The CLI now correctly resolves through the npm-created symlink. Affects every npm-installed user of v0.2.5; v0.2.5.1 is required.
 
