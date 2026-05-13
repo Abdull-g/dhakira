@@ -4,6 +4,11 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+- Fix: `dhakira init` now ships default wildcard pass-through tools per detected provider, so OAuth-shaped auth (Claude Code v2.1.139+ subscription, Console API path, future OAuth flows) is forwarded upstream and authenticated by the provider instead of being rejected at the proxy. (Bug #10)
+- Fix: wildcard tool matching is now provider-aware — a wildcard with `provider: anthropic` will no longer accidentally catch OpenAI Bearer requests, and vice versa. Wildcard match requires the request URL to classify to the tool's provider. (Bug #16)
+
 ## [0.2.6] - 2026-05-12
 
 - Fixed: CLI silently exited with no output when installed via npm install -g due to a symlink-resolution bug in the entry-point guard. The CLI now correctly resolves through the npm-created symlink. Affects every npm-installed user of v0.2.5; v0.2.5.1 is required.

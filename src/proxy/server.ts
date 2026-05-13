@@ -9,7 +9,7 @@ import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
 import { estimateMessagesTokens } from '../utils/tokens.js'
 import { parseAnthropicRequest } from './anthropic.js'
-import { detectFormat, HOP_BY_HOP_HEADERS, isRecord } from './detect.js'
+import { classifyProviderByUrl, detectFormat, HOP_BY_HOP_HEADERS, isRecord } from './detect.js'
 import { parseOpenAIRequest } from './openai.js'
 import { forwardRequest, pipeResponse, readBody } from './stream.js'
 import type { NormalizedRequest } from './types.js'
@@ -57,12 +57,17 @@ export function matchTool(
   tools: ToolConfig[],
   authHeader: string | undefined,
   xApiKeyHeader: string | undefined,
+  requestUrl: string,
 ): ToolConfig | null {
   const bearerToken = authHeader?.replace(/^Bearer\s+/i, '')
+  const requestProvider = classifyProviderByUrl(requestUrl)
 
   for (const tool of tools) {
-    // Wildcard: match any request for this provider type (accepts any auth header)
+    // Wildcard: match only requests whose URL belongs to the same provider.
     if (tool.apiKey === '*') {
+      if (requestProvider !== tool.provider) {
+        continue
+      }
       if (tool.provider === 'openai' && (bearerToken || xApiKeyHeader)) return tool
       if (tool.provider === 'anthropic' && (xApiKeyHeader || bearerToken)) return tool
       continue
@@ -348,7 +353,7 @@ async function handleRequest(
 
   const authHeader = req.headers.authorization as string | undefined
   const xApiKeyHeader = req.headers['x-api-key'] as string | undefined
-  const tool = matchTool(config.tools, authHeader, xApiKeyHeader)
+  const tool = matchTool(config.tools, authHeader, xApiKeyHeader, requestUrl)
 
   if (tool === null) {
     logger.warn('No matching tool configuration found', { url: requestUrl })

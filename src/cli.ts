@@ -236,6 +236,7 @@ function generateConfigYaml(
   detected: ToolDef[],
   localServers: LocalServer[],
   addAnthropicWildcard: boolean,
+  addOpenAIWildcard: boolean,
 ): string {
   const lines: string[] = ['# Dhakira configuration', '']
 
@@ -244,7 +245,8 @@ function generateConfigYaml(
   lines.push('  debug: false')
   lines.push('')
 
-  const hasTools = detected.length > 0 || localServers.length > 0 || addAnthropicWildcard
+  const hasTools =
+    detected.length > 0 || localServers.length > 0 || addAnthropicWildcard || addOpenAIWildcard
 
   if (!hasTools) {
     lines.push('tools:')
@@ -279,11 +281,22 @@ function generateConfigYaml(
     lines.push(`    baseUrl: ${s.baseUrl}`)
   }
 
+  if (addAnthropicWildcard || addOpenAIWildcard) {
+    lines.push('  # Wildcard pass-through for OAuth and non-matching keys.')
+  }
+
   if (addAnthropicWildcard) {
     lines.push('  - name: Claude Code (subscription)')
     lines.push('    provider: anthropic')
     lines.push('    apiKey: "*"')
     lines.push('    baseUrl: https://api.anthropic.com')
+  }
+
+  if (addOpenAIWildcard) {
+    lines.push('  - name: OpenAI (passthrough)')
+    lines.push('    provider: openai')
+    lines.push('    apiKey: "*"')
+    lines.push('    baseUrl: https://api.openai.com/v1')
   }
 
   lines.push('')
@@ -409,7 +422,8 @@ async function commandInit(): Promise<void> {
     }
   }
 
-  let addAnthropicWildcard = false
+  let addAnthropicWildcard = detected.some((tool) => tool.provider === 'anthropic')
+  const addOpenAIWildcard = detected.some((tool) => tool.provider === 'openai')
   if (!detected.some((tool) => tool.provider === 'anthropic')) {
     console.log('')
     console.log(`  Do you use Claude Code with a Max/Pro subscription (not API key)?`)
@@ -447,7 +461,7 @@ async function commandInit(): Promise<void> {
   await mkdir(join(walletDir, 'memories'), { recursive: true })
   await writeFile(
     join(walletDir, 'config.yaml'),
-    generateConfigYaml(detected, detectedLocal, addAnthropicWildcard),
+    generateConfigYaml(detected, detectedLocal, addAnthropicWildcard, addOpenAIWildcard),
     'utf8',
   )
   console.log(`  ${c.green('✓')} Wallet: ${c.cyan(tildePath(walletDir))}`)

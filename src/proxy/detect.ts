@@ -26,6 +26,21 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Classify the provider from request URL path only. */
+export function classifyProviderByUrl(url: string): DetectedFormat {
+  // Anthropic: /v1/messages path
+  if (url.startsWith('/v1/messages')) {
+    return 'anthropic'
+  }
+
+  // OpenAI: /v1/chat/completions or other chat paths
+  if (url.startsWith('/v1/chat/') || url.startsWith('/v1/completions')) {
+    return 'openai'
+  }
+
+  return 'unknown'
+}
+
 /**
  * Detect whether an incoming request is in OpenAI or Anthropic format.
  *
@@ -37,14 +52,9 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function detectFormat(req: IncomingMessage, body: unknown): DetectedFormat {
   const url = req.url ?? ''
 
-  // Anthropic: /v1/messages path
-  if (url.startsWith('/v1/messages')) {
-    return 'anthropic'
-  }
-
-  // OpenAI: /v1/chat/completions or other chat paths
-  if (url.startsWith('/v1/chat/') || url.startsWith('/v1/completions')) {
-    return 'openai'
+  const providerFromUrl = classifyProviderByUrl(url)
+  if (providerFromUrl !== 'unknown') {
+    return providerFromUrl
   }
 
   // Header-based fallback: Anthropic always sends anthropic-version
