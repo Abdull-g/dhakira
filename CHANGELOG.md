@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-05-13
+
 - Fix: `dhakira init` now ships default wildcard pass-through tools per detected provider, so OAuth-shaped auth (Claude Code v2.1.139+ subscription, Console API path, future OAuth flows) is forwarded upstream and authenticated by the provider instead of being rejected at the proxy. (Bug #10)
 - Fix: wildcard tool matching is now provider-aware — a wildcard with `provider: anthropic` will no longer accidentally catch OpenAI Bearer requests, and vice versa. Wildcard match requires the request URL to classify to the tool's provider. (Bug #16)
 
