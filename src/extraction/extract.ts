@@ -3,10 +3,11 @@
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 
-import type { QMDStore } from '@tobilu/qmd'
 import type { WalletConfig } from '../config/schema.js'
 import { createLogger } from '../utils/logger.js'
-import { callLocalLLM } from './local-llm.js'
+import { ExternalLLMExtractor } from './external-extractor.js'
+import type { Extractor, ExtractorOptions } from './extractor.js'
+import { LocalLLMExtractor } from './local-extractor.js'
 import { EXTRACT_PROMPT, fillTemplate } from './prompts.js'
 import type { ExtractedFact, ExtractionResult } from './types.js'
 
@@ -169,18 +170,28 @@ export async function callLLM(
 }
 
 export async function callExtractionLLM(
-  store: QMDStore,
   config: WalletConfig['extraction'],
   messages: LLMMessage[],
-  options?: { maxTokens?: number; temperature?: number },
+  options?: ExtractorOptions,
 ): Promise<Result<OpenAIResponse>> {
+  const extractor = resolveExtractor(config)
+  return extractor.extract(messages, options)
+}
+
+let localExtractor: LocalLLMExtractor | null = null
+
+export function resolveExtractor(config: WalletConfig['extraction']): Extractor {
   const resolved = resolveApiKey(config.apiKey)
   if (resolved.trim().length > 0) {
-    return callLLM(config.baseUrl, config.apiKey, config.model, messages)
+    return new ExternalLLMExtractor({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+    })
   }
 
-  // TODO(v0.2.5-tune): Empty API key currently selects local fallback implicitly; consider explicit extraction.provider config.
-  return callLocalLLM(store, messages, options)
+  localExtractor ??= new LocalLLMExtractor()
+  return localExtractor
 }
 
 /** Extract the text content from an OpenAI response */
@@ -254,7 +265,6 @@ export async function extractFacts(
   config: WalletConfig['extraction'],
   conversationId: string,
   conversationDate: string | undefined,
-  store: QMDStore,
 ): Promise<Result<ExtractionResult>> {
   const logger = createLogger('extraction')
 
@@ -267,7 +277,7 @@ export async function extractFacts(
 
   logger.info('Extracting facts', { conversationId })
 
-  const llmResult = await callExtractionLLM(store, config, [{ role: 'user', content: prompt }])
+  const llmResult = await callExtractionLLM(config, [{ role: 'user', content: prompt }])
 
   if (!llmResult.ok) {
     logger.error('LLM call failed during extraction', {

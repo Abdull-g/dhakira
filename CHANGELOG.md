@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Architecture
+- Extraction is now fully decoupled from QMD. Layer 2 (profile.md synthesis) has its own `Extractor` interface with local-first and external implementations. QMD bumps will no longer risk breaking memory synthesis.
+
+### Fixed
+- Layer 2 profile synthesis: replaced the broken local extraction with a chat-template-aware loader using LFM2.5-1.2B-Instruct (instruction-tuned, ~730MB, downloaded on first use). Previously produced empty profile.md files. (Bug #19)
+- Capture pipeline now filters Claude Code's built-in autocomplete prompts (`[SUGGESTION MODE: …]`) instead of treating them as real user conversation. (Bug #15)
+
+### Added
+- `dhakira init`: optional prompt to use your detected AI API key for higher-quality memory synthesis (default: keep local).
+- Lazy download with progress for the local extraction model on first use.
+- Automatic unload of the local extraction model after 2 minutes of inactivity to keep RAM use minimal.
+
 ## [0.2.7] - 2026-05-13
 
 - Fix: `dhakira init` now ships default wildcard pass-through tools per detected provider, so OAuth-shaped auth (Claude Code v2.1.139+ subscription, Console API path, future OAuth flows) is forwarded upstream and authenticated by the provider instead of being rejected at the proxy. (Bug #10)

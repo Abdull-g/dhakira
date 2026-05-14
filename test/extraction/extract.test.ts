@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events'
 import type { ClientRequest } from 'node:http'
-import type { QMDStore } from '@tobilu/qmd'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock HTTP modules before importing the module under test
@@ -66,13 +65,6 @@ const BASE_CONFIG = {
   model: 'gpt-4o-mini',
   apiKey: 'test-key',
   baseUrl: 'https://api.openai.com/v1',
-}
-
-function makeStore(): QMDStore {
-  return {
-    internal: {} as never,
-    dbPath: '/tmp/test.sqlite',
-  } as unknown as QMDStore
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +223,7 @@ That's great! Go is a solid choice for backend systems.
 I prefer PostgreSQL over MySQL for databases.`
 
   function extractConversation() {
-    return extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123', undefined, makeStore())
+    return extractFacts(CONVERSATION, '', '', BASE_CONFIG, 'conv_abc123', undefined)
   }
 
   it('returns extracted facts on a valid LLM response', async () => {
@@ -333,7 +325,6 @@ I prefer PostgreSQL over MySQL for databases.`
       BASE_CONFIG,
       'c1',
       undefined,
-      makeStore(),
     )
 
     // Verify the LLM was called — the profile is baked into the request body

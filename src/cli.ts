@@ -216,6 +216,17 @@ const LOCAL_SERVERS: LocalServer[] = [
   { name: 'LocalAI', url: 'http://localhost:8080', baseUrl: 'http://localhost:8080/v1' },
 ]
 
+function extractionProviderName(tool: ToolDef): string {
+  if (tool.envVar === 'ANTHROPIC_API_KEY') return 'Anthropic'
+  return tool.name
+}
+
+function extractionModelForTool(tool: ToolDef): string {
+  if (tool.envVar === 'ANTHROPIC_API_KEY') return 'claude-3-5-haiku-latest'
+  if (tool.envVar === 'OPENROUTER_API_KEY') return 'openai/gpt-4o-mini'
+  return 'gpt-4o-mini'
+}
+
 /** Probe a local server by hitting a lightweight endpoint. */
 async function probeLocalServer(server: LocalServer): Promise<boolean> {
   const controller = new AbortController()
@@ -237,6 +248,7 @@ function generateConfigYaml(
   localServers: LocalServer[],
   addAnthropicWildcard: boolean,
   addOpenAIWildcard: boolean,
+  extractionTool: ToolDef | null,
 ): string {
   const lines: string[] = ['# Dhakira configuration', '']
 
@@ -300,6 +312,15 @@ function generateConfigYaml(
   }
 
   lines.push('')
+
+  if (extractionTool !== null) {
+    lines.push('extraction:')
+    lines.push(`  model: ${extractionModelForTool(extractionTool)}`)
+    lines.push(`  apiKey: env:${extractionTool.envVar}`)
+    lines.push(`  baseUrl: ${extractionTool.baseUrl}`)
+    lines.push('')
+  }
+
   return lines.join('\n')
 }
 
@@ -454,6 +475,21 @@ async function commandInit(): Promise<void> {
     }
   }
 
+  let extractionTool: ToolDef | null = null
+  if (detected.length > 0) {
+    const candidate = detected[0]
+    const useExternal = await prompt(
+      `  For memory synthesis, Dhakira uses a local model by default — fully private, no API calls. We can also use your detected ${extractionProviderName(candidate)} for slightly higher quality (~$0.01/refresh). Use external? [y/N] `,
+    )
+    if (useExternal.toLowerCase() === 'y') {
+      extractionTool = candidate
+    }
+  } else {
+    console.log(
+      '  Dhakira will use its built-in local model for memory synthesis (~730MB, downloaded on first use). All private, no cost.',
+    )
+  }
+
   // Create wallet directory structure
   await mkdir(walletDir, { recursive: true })
   await mkdir(join(walletDir, 'turns'), { recursive: true })
@@ -461,7 +497,7 @@ async function commandInit(): Promise<void> {
   await mkdir(join(walletDir, 'memories'), { recursive: true })
   await writeFile(
     join(walletDir, 'config.yaml'),
-    generateConfigYaml(detected, detectedLocal, addAnthropicWildcard, addOpenAIWildcard),
+    generateConfigYaml(detected, detectedLocal, addAnthropicWildcard, addOpenAIWildcard, extractionTool),
     'utf8',
   )
   console.log(`  ${c.green('✓')} Wallet: ${c.cyan(tildePath(walletDir))}`)

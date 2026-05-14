@@ -160,6 +160,62 @@ describe('classifyConversation', () => {
     expect(classifications.every((item) => item.category === 'tool_intermediate')).toBe(true)
     expect(classifications.every((item) => item.keep === false)).toBe(true)
   })
+
+  it('classifies Claude Code suggestion-mode prompts as tool_internal_autocomplete', async () => {
+    const classification = await classifyRecord({
+      id: 'suggestion-mode-fixture',
+      url: 'https://api.anthropic.com/v1/messages',
+      reqBody: {
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 128,
+        messages: [
+          {
+            role: 'user',
+            content:
+              "[SUGGESTION MODE: Suggest what the user might naturally type next into Claude Code.] FIRST: Look at the user's recent messages and suggest a continuation.",
+          },
+        ],
+      },
+      respBodyRaw: JSON.stringify({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'tell me about what dhakira is' }],
+      }),
+      respStatus: 200,
+    })
+
+    expect(classification).toMatchObject({
+      category: 'tool_internal_autocomplete',
+      keep: false,
+      ruleId: 'claude-code-suggestion-mode',
+    })
+  })
+
+  it('does not classify normal user messages as tool_internal_autocomplete', async () => {
+    const classification = await classifyRecord({
+      id: 'normal-user-fixture',
+      url: 'https://api.anthropic.com/v1/messages',
+      reqBody: {
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1024,
+        messages: [
+          {
+            role: 'user',
+            content: 'Tell me about what Dhakira is and how memory capture works.',
+          },
+        ],
+      },
+      respBodyRaw: JSON.stringify({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Dhakira is a local-first memory wallet.' }],
+      }),
+      respStatus: 200,
+    })
+
+    expect(classification).toMatchObject({
+      category: 'real_conversation',
+      keep: true,
+    })
+  })
 })
 
 function hasMessagesRecord(record: CorpusRecord): boolean {

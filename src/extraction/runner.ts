@@ -208,7 +208,6 @@ async function processConversation(
     ctx.config,
     fm.id,
     fm.timestamp.split('T')[0],
-    ctx.store,
   )
   if (!extractResult.ok) {
     logger.warn('Extraction failed', { id: fm.id, error: extractResult.error.message })
@@ -418,7 +417,7 @@ export async function runExtraction(
       })
     }
 
-    await regenerateProfile(walletDir, config, store)
+    await regenerateProfile(walletDir, config)
   }
 
   // Save state — only successfully processed IDs are in processedIds

@@ -6,6 +6,7 @@ export type CaptureCategory =
   | 'title_generation'
   | 'summarization'
   | 'tool_intermediate'
+  | 'tool_internal_autocomplete'
   | 'tool_only_roundtrip'
   | 'pre_flight'
   | 'error_response'
@@ -20,6 +21,7 @@ export interface Classification {
 export interface RuleConditions {
   system_prompt_contains_all?: string[]
   system_prompt_contains_any?: string[]
+  user_first_message_starts_with?: string
   model_includes?: string
   max_tokens_lte?: number
   response_json_keys_only?: string[]
@@ -69,6 +71,14 @@ export const DEFAULT_CLASSIFIER_RULES: ClassifierRules = {
       },
     },
   ],
+  tool_internal_autocomplete: [
+    {
+      id: 'claude-code-suggestion-mode',
+      require_all: {
+        user_first_message_starts_with: '[SUGGESTION MODE:',
+      },
+    },
+  ],
   // TODO(v0.2.5): Add aider-repo-map once classifier rules can target system/first-user
   // boilerplate without dropping real turns. Exact aider marker:
   // "Here are summaries of some files present in my git repo."
@@ -83,6 +93,7 @@ const SKIP_CATEGORIES = new Set<CaptureCategory>([
   'title_generation',
   'summarization',
   'tool_intermediate',
+  'tool_internal_autocomplete',
   'pre_flight',
 ])
 
@@ -111,6 +122,10 @@ function normalizeConditions(raw: Record<string, unknown>): RuleConditions {
   return {
     system_prompt_contains_all: stringArray(raw.system_prompt_contains_all),
     system_prompt_contains_any: stringArray(raw.system_prompt_contains_any),
+    user_first_message_starts_with:
+      typeof raw.user_first_message_starts_with === 'string'
+        ? raw.user_first_message_starts_with
+        : undefined,
     model_includes: typeof raw.model_includes === 'string' ? raw.model_includes : undefined,
     max_tokens_lte: typeof raw.max_tokens_lte === 'number' ? raw.max_tokens_lte : undefined,
     response_json_keys_only: stringArray(raw.response_json_keys_only),
@@ -135,6 +150,7 @@ function isCaptureCategory(value: string): value is CaptureCategory {
     value === 'title_generation' ||
     value === 'summarization' ||
     value === 'tool_intermediate' ||
+    value === 'tool_internal_autocomplete' ||
     value === 'tool_only_roundtrip' ||
     value === 'pre_flight' ||
     value === 'error_response'
@@ -153,6 +169,7 @@ export function classifyConversation(
     'title_generation',
     'summarization',
     'tool_intermediate',
+    'tool_internal_autocomplete',
     'tool_only_roundtrip',
     'error_response',
   ]
@@ -216,6 +233,13 @@ function matchesRule(trace: ConversationTrace, rule: ClassifierRule): boolean {
   }
 
   if (
+    conditions.user_first_message_starts_with !== undefined &&
+    !userFirstMessageText(trace).startsWith(conditions.user_first_message_starts_with)
+  ) {
+    return false
+  }
+
+  if (
     conditions.model_includes !== undefined &&
     !model.includes(conditions.model_includes.toLowerCase())
   ) {
@@ -248,6 +272,14 @@ function matchesRule(trace: ConversationTrace, rule: ClassifierRule): boolean {
   }
 
   return true
+}
+
+function userFirstMessageText(trace: ConversationTrace): string {
+  const firstUserMessage = trace.messages.find((message) => message.role === 'user')
+  if (firstUserMessage === undefined) return ''
+  return firstUserMessage.content
+    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    .join('\n')
 }
 
 function responseJsonKeysOnly(rawResponse: unknown, expectedKeys: string[]): boolean {
