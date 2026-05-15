@@ -7,7 +7,7 @@ import type { QMDStore } from '@tobilu/qmd'
 import type { WalletConfig } from '../config/schema.js'
 import type { Result } from '../proxy/types.js'
 import { createLogger } from '../utils/logger.js'
-import { callLLM, extractContent } from './extract.js'
+import { extractContent, resolveExtractor } from './extract.js'
 import { fillTemplate, UPDATE_PROMPT } from './prompts.js'
 import type { ExtractedFact, UpdateAction } from './types.js'
 
@@ -114,9 +114,8 @@ async function decideActionForFact(
     existing_memories: searchResult.value,
   })
 
-  const llmResult = await callLLM(config.baseUrl, config.apiKey, config.model, [
-    { role: 'user', content: prompt },
-  ])
+  const extractor = resolveExtractor(config)
+  const llmResult = await extractor.extract([{ role: 'user', content: prompt }])
   if (!llmResult.ok) {
     logger.warn('LLM call failed, defaulting to ADD', {
       fact: fact.text,

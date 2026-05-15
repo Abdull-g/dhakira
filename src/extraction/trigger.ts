@@ -32,6 +32,12 @@ export async function maybeTriggerExtraction(
   store: QMDStore,
   config: WalletConfig,
 ): Promise<void> {
+  const logger = createLogger('extraction:trigger')
+  logger.info('Auto-extract trigger invoked', {
+    captured: capturedSinceLastTrigger,
+    lastRunAt: cachedLastRunAt ?? 'unknown',
+  })
+
   await loadCachedState(walletDir)
 
   if (isExtractionRunning) {

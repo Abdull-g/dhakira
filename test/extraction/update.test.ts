@@ -6,9 +6,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('node:https', () => ({ request: vi.fn() }))
 vi.mock('node:http', () => ({ request: vi.fn() }))
 
+vi.mock('../../src/extraction/extract.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/extraction/extract.js')>()
+  return {
+    ...actual,
+    resolveExtractor: vi.fn(actual.resolveExtractor),
+  }
+})
+
 const httpsMock = await import('node:https')
 
 import type { ExtractedFact } from '../../src/extraction/types.ts'
+import { resolveExtractor } from '../../src/extraction/extract.js'
 import { processUpdates } from '../../src/extraction/update.ts'
 
 // ---------------------------------------------------------------------------
@@ -90,6 +99,53 @@ const IDENTITY_FACT: ExtractedFact = {
   category: 'IDENTITY',
   confidence: 'HIGH',
 }
+
+// ---------------------------------------------------------------------------
+// processUpdates — local extractor (Phase 2 decouple, no API key)
+// ---------------------------------------------------------------------------
+
+describe('processUpdates — local-first Phase 2', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('processUpdates uses local extractor when no API key configured', async () => {
+    const store = makeStoreMock([
+      { filepath: '/memories/mem_dup.md', body: 'Prefers PostgreSQL over MySQL', score: 0.99 },
+    ])
+
+    const configNoKey = { ...BASE_CONFIG, apiKey: '' }
+
+    const stubExtractor = {
+      extract: vi.fn().mockResolvedValue({
+        ok: true,
+        value: {
+          choices: [
+            {
+              message: {
+                role: 'assistant' as const,
+                content: JSON.stringify({
+                  action: 'NOOP',
+                  reason: 'already captured',
+                }),
+              },
+            },
+          ],
+        },
+      }),
+    }
+
+    vi.mocked(resolveExtractor).mockImplementationOnce(() => stubExtractor as never)
+
+    const result = await processUpdates([PREFERENCE_FACT], store, configNoKey)
+
+    expect(stubExtractor.extract).toHaveBeenCalledOnce()
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value[0].action).toBe('NOOP')
+    if (result.value[0].action !== 'NOOP') return
+    expect(result.value[0].reason).toBe('already captured')
+    expect(vi.mocked(httpsMock.request)).not.toHaveBeenCalled()
+  })
+})
 
 // ---------------------------------------------------------------------------
 // processUpdates — ADD action

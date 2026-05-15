@@ -305,7 +305,11 @@ export async function captureConversationOnce(
         conversation.tool,
       )
       // Fire-and-forget: capture-driven Layer 2 auto-extract.
-      maybeTriggerExtraction(config.walletDir, store, config).catch(() => {})
+      maybeTriggerExtraction(config.walletDir, store, config).catch((err) => {
+        log.warn('Auto-extract trigger failed', {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      })
       return
     }
 
@@ -360,7 +364,11 @@ export async function captureConversationOnce(
     conversation.tool,
   )
   // Fire-and-forget: capture-driven Layer 2 auto-extract.
-  maybeTriggerExtraction(config.walletDir, store, config).catch(() => {})
+  maybeTriggerExtraction(config.walletDir, store, config).catch((err) => {
+    log.warn('Auto-extract trigger failed', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  })
 }
 
 export function createCaptureConversation(
