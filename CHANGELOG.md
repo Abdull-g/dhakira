@@ -4,19 +4,29 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.8] - 2026-05-15
+
+The privacy-local-first release. Layer 2 (profile synthesis) now runs end-to-end on a local instruction-tuned model by default — no API keys, no network calls during extraction. The whole extraction engine is decoupled from QMD's internals, so QMD point-releases can no longer break memory synthesis. Phase 1 (fact extraction) and Phase 2 (ADD/UPDATE/INVALIDATE dedup) both honor the same local-first contract.
 
 ### Architecture
 - Extraction is now fully decoupled from QMD. Layer 2 (profile.md synthesis) has its own `Extractor` interface with local-first and external implementations. QMD bumps will no longer risk breaking memory synthesis.
+- Both Phase 1 (fact extraction) and Phase 2 (ADD/UPDATE/INVALIDATE/NOOP dedup) route through the same `Extractor` interface — same code path local-or-external for every LLM call extraction makes.
 
 ### Fixed
-- Layer 2 profile synthesis: replaced the broken local extraction with a chat-template-aware loader using LFM2.5-1.2B-Instruct (instruction-tuned, ~730MB, downloaded on first use). Previously produced empty profile.md files. (Bug #19)
-- Capture pipeline now filters Claude Code's built-in autocomplete prompts (`[SUGGESTION MODE: …]`) instead of treating them as real user conversation. (Bug #15)
+- Layer 2 profile synthesis: replaced the broken local extraction with a chat-template-aware loader using LFM2.5-1.2B-Instruct (instruction-tuned, ~730MB, downloaded on first use). Previously produced empty profile.md files.
+- Phase 2 dedup with no API key configured: previously fell through to a raw HTTP call that always failed with no API key, silently defaulting every fact to ADD. Now correctly uses the local extractor for dedup decisions, so smart UPDATE / INVALIDATE / NOOP works without an API key.
+- Capture pipeline now filters Claude Code's built-in autocomplete prompts (`[SUGGESTION MODE: …]`) so they aren't treated as real user conversation.
+- Auto-extract trigger errors are no longer silently swallowed at the capture call sites — failures now log a warning instead of disappearing.
 
 ### Added
 - `dhakira init`: optional prompt to use your detected AI API key for higher-quality memory synthesis (default: keep local).
 - Lazy download with progress for the local extraction model on first use.
 - Automatic unload of the local extraction model after 2 minutes of inactivity to keep RAM use minimal.
+- Diagnostic log line at the top of every auto-extract trigger invocation, so capture-driven extraction is visible in `dhakira start --verbose`.
+
+### Notes
+- **Hardware:** Dhakira targets Node.js 22+, ~8 GB RAM, and a modern CPU (Apple Silicon or x86_64 2018+). Older machines may experience laggy retrieval and slow extraction.
+- **Privacy local-first is the default.** No external API calls are made during extraction unless you explicitly configure `extraction.apiKey` in `~/.dhakira/config.yaml`.
 
 ## [0.2.7] - 2026-05-13
 
