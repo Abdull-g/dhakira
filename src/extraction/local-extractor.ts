@@ -2,12 +2,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import {
+  type GbnfJsonObjectSchema,
   getLlama,
-  LlamaChatSession,
-  LlamaLogLevel,
-  resolveModelFile,
   type Llama,
+  LlamaChatSession,
+  type LlamaGrammar,
+  LlamaLogLevel,
   type LlamaModel,
+  resolveModelFile,
 } from 'node-llama-cpp'
 
 import { createLogger } from '../utils/logger.js'
@@ -83,6 +85,65 @@ export class LocalLLMExtractor implements Extractor {
       }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err : new Error(String(err)) }
+    } finally {
+      this.activeExtractions--
+      this.scheduleInactivityUnload()
+    }
+  }
+
+  /**
+   * Model-agnostic generation seam for the harness (additive; does not touch `extract()`).
+   *
+   * When `jsonSchema` is provided, output is grammar-constrained via
+   * node-llama-cpp's `createGrammarForJsonSchema` so the model can only emit
+   * JSON matching the schema. Keeps ALL node-llama-cpp + grammar code in this
+   * layer — the harness core stays llama-free.
+   *
+   * Returns the raw generated text plus whether constraint was applied. Throws
+   * on failure (the harness contract: `ModelHandle.generate` resolves text or throws).
+   */
+  async generate(
+    prompt: string,
+    opts: {
+      jsonSchema?: Readonly<Record<string, unknown>>
+      maxTokens?: number
+      temperature?: number
+    } = {},
+  ): Promise<{ text: string; constrained: boolean }> {
+    if (this.disposed) {
+      throw new Error('LocalLLMExtractor has been disposed')
+    }
+
+    this.activeExtractions++
+    this.clearInactivityTimer()
+
+    try {
+      const model = await this.ensureModel()
+      const context = await model.createContext()
+      try {
+        const session = new LlamaChatSession({
+          contextSequence: context.getSequence(),
+          autoDisposeSequence: true,
+        })
+
+        let grammar: LlamaGrammar | undefined
+        if (opts.jsonSchema) {
+          const llama = await this.ensureLlama()
+          grammar = await llama.createGrammarForJsonSchema(
+            opts.jsonSchema as unknown as GbnfJsonObjectSchema,
+          )
+        }
+
+        const text = await session.prompt(prompt, {
+          grammar,
+          maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+          temperature: opts.temperature ?? 0,
+        })
+
+        return { text, constrained: grammar !== undefined }
+      } finally {
+        await context.dispose()
+      }
     } finally {
       this.activeExtractions--
       this.scheduleInactivityUnload()

@@ -4,6 +4,10 @@ import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 
 import type { WalletConfig } from '../config/schema.js'
+import { ModelHarness } from '../harness/harness.js'
+import { LlamaHandle } from '../harness/llama-handle.js'
+import type { ModelHandle } from '../harness/model-handle.js'
+import type { HarnessTask } from '../harness/types.js'
 import { createLogger } from '../utils/logger.js'
 import { ExternalLLMExtractor } from './external-extractor.js'
 import type { Extractor, ExtractorOptions } from './extractor.js'
@@ -214,31 +218,21 @@ function isValidConfidence(value: string): value is ExtractedFact['confidence'] 
   return ['HIGH', 'MEDIUM', 'LOW'].includes(value)
 }
 
-/** Strip markdown code fences (```json ... ```) if present */
-function stripCodeFences(text: string): string {
-  const trimmed = text.trim()
-  const match = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/m)
-  return match ? match[1].trim() : trimmed
-}
-
-function parseExtractPayload(content: string): Result<ExtractLLMPayload> {
-  const cleaned = stripCodeFences(content)
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(cleaned) as Record<string, unknown>
-  } catch {
-    return {
-      ok: false,
-      error: new Error(`Failed to parse extraction JSON: ${cleaned.slice(0, 200)}`),
-    }
-  }
-
-  if (!Array.isArray(parsed.facts)) {
-    return { ok: false, error: new Error('Extraction response missing facts array') }
-  }
+/**
+ * Validate + coerce already-parsed extraction JSON into an ExtractLLMPayload.
+ *
+ * This is the post-parse half of the old `parseExtractPayload` (fence-stripping
+ * + JSON.parse now live in the harness run loop). Behavior is byte-identical on
+ * good input: invalid facts are filtered by category/confidence, and a missing
+ * `facts` array yields null (which the harness surfaces as a hard fail for the
+ * unconstrained path, or floors for the constrained path).
+ */
+function validateExtractPayload(parsed: unknown): ExtractLLMPayload | null {
+  const obj = parsed as Record<string, unknown>
+  if (!Array.isArray(obj.facts)) return null
 
   const facts: ExtractedFact[] = []
-  for (const rawFact of parsed.facts as Array<Record<string, unknown>>) {
+  for (const rawFact of obj.facts as Array<Record<string, unknown>>) {
     const text = String(rawFact.text ?? '').trim()
     const category = String(rawFact.category ?? '')
     const confidence = String(rawFact.confidence ?? '')
@@ -246,10 +240,84 @@ function parseExtractPayload(content: string): Result<ExtractLLMPayload> {
     facts.push({ text, category, confidence })
   }
 
-  return {
-    ok: true,
-    value: { facts, summary_update: String(parsed.summary_update ?? '').trim() },
+  return { facts, summary_update: String(obj.summary_update ?? '').trim() }
+}
+
+/** JSON-schema describing the extraction payload (constrains LOCAL grammar generation). */
+const EXTRACT_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    facts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          text: { type: 'string' },
+          category: {
+            enum: ['IDENTITY', 'PREFERENCE', 'CONTEXT', 'RELATIONSHIP', 'SKILL', 'EVENT'],
+          },
+          confidence: { enum: ['HIGH', 'MEDIUM', 'LOW'] },
+        },
+      },
+    },
+    summary_update: { type: 'string' },
+  },
+} as const
+
+/**
+ * The extraction task run through the harness.
+ *
+ * `floor` ({ facts: [], summary_update: '' }) only fires for a constrained
+ * (local) handle whose model stuttered — the SAFE floor that writes an empty
+ * wallet rather than fabricating facts (addresses old Bug A). The unconstrained
+ * (external) path never floors: a wrong-shape response is a genuine error,
+ * surfaced via `failureMessage` (preserving the legacy error string).
+ */
+const extractTask: HarnessTask<ExtractLLMPayload> = {
+  name: 'extract',
+  schema: {
+    jsonSchema: EXTRACT_JSON_SCHEMA,
+    validate: validateExtractPayload,
+  },
+  floor: () => ({ facts: [], summary_update: '' }),
+  failureMessage: 'Extraction response missing facts array',
+}
+
+/**
+ * ModelHandle over an Extractor that CANNOT enforce grammar constraints
+ * (external HTTP models). Delegates to `extract()` + `extractContent()` and
+ * throws on infrastructure failure (the harness treats that as terminal).
+ */
+class UnconstrainedExtractorHandle implements ModelHandle {
+  constructor(private readonly extractor: Extractor) {}
+
+  async generate(
+    prompt: string,
+    opts: { maxTokens?: number; temperature?: number },
+  ): Promise<{ text: string; constrained: boolean }> {
+    const result = await this.extractor.extract([{ role: 'user', content: prompt }], {
+      maxTokens: opts.maxTokens,
+      temperature: opts.temperature,
+    })
+    if (!result.ok) throw result.error
+
+    const content = extractContent(result.value)
+    if (!content.ok) throw content.error
+
+    return { text: content.value, constrained: false }
   }
+
+  supportsConstraint(): boolean {
+    return false
+  }
+}
+
+/** Build the right ModelHandle for the resolved extractor (local = grammar-capable). */
+function buildHandle(extractor: Extractor): ModelHandle {
+  if (extractor instanceof LocalLLMExtractor) {
+    return new LlamaHandle(extractor)
+  }
+  return new UnconstrainedExtractorHandle(extractor)
 }
 
 /**
@@ -277,36 +345,24 @@ export async function extractFacts(
 
   logger.info('Extracting facts', { conversationId })
 
-  const llmResult = await callExtractionLLM(config, [{ role: 'user', content: prompt }])
+  // Wire extraction through the model-control harness: grammar-constrained +
+  // retry + SAFE floor for the local model, validate-only (byte-identical to
+  // the legacy path) for external HTTP models.
+  const handle = buildHandle(resolveExtractor(config))
+  const harness = new ModelHarness(handle)
+  const runResult = await harness.run(extractTask, prompt, {
+    maxAttempts: handle.supportsConstraint() ? 2 : 1,
+  })
 
-  if (!llmResult.ok) {
-    logger.error('LLM call failed during extraction', {
+  if (!runResult.ok) {
+    logger.error('Extraction failed', {
       conversationId,
-      error: llmResult.error.message,
+      error: runResult.error.message,
     })
-    return llmResult
+    return runResult
   }
 
-  const contentResult = extractContent(llmResult.value)
-  if (!contentResult.ok) {
-    logger.error('Empty LLM response during extraction', {
-      conversationId,
-      error: contentResult.error.message,
-    })
-    return contentResult
-  }
-
-  // TODO(v0.2.5-tune): Local 1.7B output may need cleanup before strict JSON parsing.
-  const parseResult = parseExtractPayload(contentResult.value)
-  if (!parseResult.ok) {
-    logger.error('Failed to parse extraction response', {
-      conversationId,
-      error: parseResult.error.message,
-    })
-    return parseResult
-  }
-
-  const { facts, summary_update } = parseResult.value
+  const { facts, summary_update } = runResult.value.value
   logger.info('Facts extracted', { conversationId, factCount: facts.length })
 
   return {
