@@ -7,16 +7,19 @@ import type { QMDStore } from '@tobilu/qmd'
 import { parse } from 'yaml'
 
 import type { WalletConfig } from '../config/schema.js'
+import { clampScore, heuristicSalience } from '../salience/heuristic.js'
+import { scoreSalience } from '../salience/salience.js'
+import type { SalienceTier } from '../salience/types.js'
 import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
-import { extractFacts } from './extract.js'
+import { buildExtractionHarness, extractFacts } from './extract.js'
 import { regenerateProfile } from './profile-gen.js'
 import {
   cleanSessionContent,
   hasSubstantiveContent,
   reconstructSessions,
 } from './session-reconstructor.js'
-import type { ExtractedFact, MemoryRecord, UpdateAction } from './types.js'
+import type { ExtractedFact, MemoryRecord, ScoredFact, UpdateAction } from './types.js'
 import { processUpdates } from './update.js'
 
 type Result<T> = import('../proxy/types.js').Result<T>
@@ -87,6 +90,8 @@ function buildMemoryContent(memory: MemoryRecord): string {
     `id: ${memory.id}`,
     `category: ${memory.category}`,
     `confidence: ${memory.confidence}`,
+    `salienceScore: ${memory.salienceScore}`,
+    `salienceTier: ${memory.salienceTier}`,
     `source: ${memory.source}`,
     `createdAt: ${memory.createdAt.toISOString()}`,
     `validFrom: ${memory.validFrom.toISOString()}`,
@@ -94,6 +99,37 @@ function buildMemoryContent(memory: MemoryRecord): string {
     '---',
   ]
   return `${lines.join('\n')}\n\n${memory.text}`
+}
+
+const DEFAULT_SALIENCE_SCORE = 0.5
+const DEFAULT_SALIENCE_TIER: SalienceTier = 'standard'
+const SALIENCE_TIERS: readonly SalienceTier[] = ['core', 'standard', 'trivia']
+
+/**
+ * Read salience from a memory file's frontmatter. Backward-compatible (REQUIRED):
+ * OLD memory files written before salience existed have no salience lines, so
+ * they default to a neutral 0.5 / 'standard' rather than failing to parse.
+ * (Step 4's two-tier store will consume this; exposed now for that + tests.)
+ */
+export function readMemorySalience(content: string): {
+  salienceScore: number
+  salienceTier: SalienceTier
+} {
+  const fallback = { salienceScore: DEFAULT_SALIENCE_SCORE, salienceTier: DEFAULT_SALIENCE_TIER }
+  const match = content.match(/^---\n([\s\S]*?)\n---/)
+  if (!match?.[1]) return fallback
+  try {
+    const parsed = parse(match[1]) as Record<string, unknown>
+    const rawScore = Number(parsed.salienceScore)
+    const salienceScore = Number.isFinite(rawScore) ? clampScore(rawScore) : DEFAULT_SALIENCE_SCORE
+    const rawTier = String(parsed.salienceTier ?? '')
+    const salienceTier = SALIENCE_TIERS.includes(rawTier as SalienceTier)
+      ? (rawTier as SalienceTier)
+      : DEFAULT_SALIENCE_TIER
+    return { salienceScore, salienceTier }
+  } catch {
+    return fallback
+  }
 }
 
 async function writeMemoryFile(walletDir: string, memory: MemoryRecord): Promise<void> {
@@ -113,11 +149,17 @@ async function invalidateMemoryFile(walletDir: string, memoryId: string): Promis
 }
 
 function factToMemory(fact: ExtractedFact, sourceId: string, convTimestamp: Date): MemoryRecord {
+  // Salience rides on the fact as a ScoredFact through processUpdates. Defensive
+  // default: if an unscored fact ever reaches storage, fall back to the
+  // deterministic heuristic so we NEVER persist an undefined salience.
+  const salience = (fact as ScoredFact).salience ?? heuristicSalience(fact)
   return {
     id: generateId('mem'),
     text: fact.text,
     category: fact.category,
     confidence: fact.confidence,
+    salienceScore: salience.score,
+    salienceTier: salience.tier,
     source: sourceId,
     createdAt: new Date(),
     validFrom: convTimestamp,
@@ -219,7 +261,18 @@ async function processConversation(
   const partialStats: Partial<ExtractionStats> = { factsExtracted: facts.length }
 
   if (facts.length > 0) {
-    const updateResult = await processUpdates(facts, ctx.store, ctx.config)
+    // Score salience ONCE per fact, at extraction time while the model is warm,
+    // through the SAME harness/handle extraction uses (no second model). The
+    // salience rides WITH each fact (ScoredFact) so it survives the dedup/reorder
+    // in processUpdates and arrives intact at factToMemory.
+    const harness = buildExtractionHarness(ctx.config)
+    const scoredFacts: ScoredFact[] = []
+    for (const fact of facts) {
+      const salience = await scoreSalience(fact, harness)
+      scoredFacts.push({ ...fact, salience })
+    }
+
+    const updateResult = await processUpdates(scoredFacts, ctx.store, ctx.config)
     if (updateResult.ok) {
       const actionStats: ExtractionStats = {
         conversationsProcessed: 0,

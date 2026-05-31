@@ -110,6 +110,26 @@ Format:
 
 Respond with ONLY the formatted profile.`
 
+export const SALIENCE_PROMPT = `You score how intrinsically important ONE fact about the user is for long-term memory.
+
+FACT: {fact_text}
+CATEGORY: {category}
+CONFIDENCE: {confidence}
+
+Judge how much this fact matters for understanding who the user is over the long term.
+- score: a number from 0 to 1 (1 = defining/essential, 0 = trivial/disposable)
+- tier: "core" (defining identity, key relationships, lasting traits), "standard" (useful context, preferences, skills), or "trivia" (minor, fleeting, or low-value)
+- reason: one short clause (max ~12 words) explaining the score
+
+Guidance:
+- Stable identity and important relationships score highest.
+- Preferences and skills are usually "standard".
+- One-off events or vague mentions are usually low / "trivia".
+- Lower confidence should pull the score down.
+
+Respond with ONLY valid JSON:
+{"score": 0.0, "tier": "standard", "reason": "..."}`
+
 /** Substitute {placeholder} variables in a prompt template */
 export function fillTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (_match, key: string) => vars[key] ?? `{${key}}`)

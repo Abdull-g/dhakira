@@ -321,6 +321,17 @@ function buildHandle(extractor: Extractor): ModelHandle {
 }
 
 /**
+ * Build a ModelHarness over the configured extractor's handle. Additive factory
+ * so OTHER harness consumers (salience) reuse the SAME warm handle extraction
+ * uses — `resolveExtractor` returns the cached local model singleton, so no
+ * second model is ever spun up. Extraction itself keeps building its handle
+ * inline (behavior unchanged); this just exposes the wiring for reuse.
+ */
+export function buildExtractionHarness(config: WalletConfig['extraction']): ModelHarness {
+  return new ModelHarness(buildHandle(resolveExtractor(config)))
+}
+
+/**
  * Phase 1: Extract personal facts from a conversation markdown string.
  *
  * Calls the configured LLM with EXTRACT_PROMPT and parses the JSON response
