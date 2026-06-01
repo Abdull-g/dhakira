@@ -10,6 +10,7 @@ import type { WalletConfig } from '../config/schema.js'
 import { clampScore, heuristicSalience } from '../salience/heuristic.js'
 import { scoreSalience } from '../salience/salience.js'
 import type { SalienceTier } from '../salience/types.js'
+import { computeExpiresAt } from '../store/tier-policy.js'
 import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
 import { buildExtractionHarness, extractFacts } from './extract.js'
@@ -84,7 +85,7 @@ function countMessages(content: string): number {
   return (content.match(/^## (User|Assistant)$/gm) ?? []).length
 }
 
-function buildMemoryContent(memory: MemoryRecord): string {
+export function buildMemoryContent(memory: MemoryRecord): string {
   const lines = [
     '---',
     `id: ${memory.id}`,
@@ -96,6 +97,7 @@ function buildMemoryContent(memory: MemoryRecord): string {
     `createdAt: ${memory.createdAt.toISOString()}`,
     `validFrom: ${memory.validFrom.toISOString()}`,
     `invalidatedAt: ${memory.invalidatedAt ? memory.invalidatedAt.toISOString() : 'null'}`,
+    `expiresAt: ${memory.expiresAt ? memory.expiresAt.toISOString() : 'null'}`,
     '---',
   ]
   return `${lines.join('\n')}\n\n${memory.text}`
@@ -132,6 +134,26 @@ export function readMemorySalience(content: string): {
   }
 }
 
+/**
+ * Read expiresAt from a memory file's frontmatter. Backward-compatible:
+ * memory files written before T04 have no expiresAt line → null (durable).
+ * Step 6 (Forget) consumes this; exposed now for that + tests.
+ */
+export function readMemoryExpiresAt(content: string): Date | null {
+  const match = content.match(/^---\n([\s\S]*?)\n---/)
+  if (!match?.[1]) return null
+  try {
+    const parsed = parse(match[1]) as Record<string, unknown>
+    if (parsed.expiresAt === null || parsed.expiresAt === undefined) return null
+    const raw = String(parsed.expiresAt)
+    if (raw === 'null' || raw === '') return null
+    const d = new Date(raw)
+    return Number.isNaN(d.getTime()) ? null : d
+  } catch {
+    return null
+  }
+}
+
 async function writeMemoryFile(walletDir: string, memory: MemoryRecord): Promise<void> {
   const memoriesDir = join(walletDir, 'memories')
   await mkdir(memoriesDir, { recursive: true })
@@ -153,6 +175,10 @@ function factToMemory(fact: ExtractedFact, sourceId: string, convTimestamp: Date
   // default: if an unscored fact ever reaches storage, fall back to the
   // deterministic heuristic so we NEVER persist an undefined salience.
   const salience = (fact as ScoredFact).salience ?? heuristicSalience(fact)
+  // Compute createdAt ONCE so the stored field and the expiry derived from it
+  // are consistent (no second new Date() drift).
+  const createdAt = new Date()
+  // TODO(T06): thread config.store TTLs once forgetting enforces expiry (constants are the source until then)
   return {
     id: generateId('mem'),
     text: fact.text,
@@ -161,9 +187,10 @@ function factToMemory(fact: ExtractedFact, sourceId: string, convTimestamp: Date
     salienceScore: salience.score,
     salienceTier: salience.tier,
     source: sourceId,
-    createdAt: new Date(),
+    createdAt,
     validFrom: convTimestamp,
     invalidatedAt: null,
+    expiresAt: computeExpiresAt(salience.tier, createdAt),
   }
 }
 

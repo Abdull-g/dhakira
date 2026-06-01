@@ -56,4 +56,6 @@ export interface MemoryRecord {
   validFrom: Date
   /** When this was invalidated (null if still valid) */
   invalidatedAt: Date | null
+  /** When this memory becomes forget-eligible (Step 6). null = durable. */
+  expiresAt: Date | null
 }
