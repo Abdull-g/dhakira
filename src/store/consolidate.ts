@@ -212,7 +212,12 @@ export function canonicalizeId(id: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
-/** Resolve the memory id from a hit's filepath (e.g. qmd://memories/mem_x.md). */
+/**
+ * Resolve the memory id from a hit's filepath (e.g. qmd://memories/mem_x.md).
+ * Returns the RAW stem — callers must NOT compare it directly to a frontmatter
+ * id; QMD handelizes the stem (`_`→`-`, lowercased), so run both sides through
+ * canonicalizeId before matching (see buildNeighborScores).
+ */
 function idFromHit(hit: NeighborHit): string {
   return basename(String(hit.file ?? hit.filepath ?? ''), '.md')
 }
@@ -274,14 +279,25 @@ async function buildNeighborScores(
   byId: Map<string, ActiveMemory>,
 ): Promise<Map<string, Map<string, number>>> {
   const searcher = new NeighborSearcher(store)
+  // Match QMD hits to our in-memory set on a CANONICAL key: handelize rewrites
+  // the indexed path stem (`mem_x`→`mem-x`, lowercased) so a raw hit stem never
+  // === our underscore frontmatter id. canonicalizeId normalizes BOTH sides.
+  // The canonical form is for MATCHING ONLY — scores are stored under the REAL
+  // neighbor id (m.id), so downstream Union-Find/clustering/apply keep using
+  // real ids unchanged.
+  const canonById = new Map<string, ActiveMemory>()
+  for (const m of byId.values()) canonById.set(canonicalizeId(m.id), m)
   const neighborScore = new Map<string, Map<string, number>>()
   for (const m of memories) {
     const scores = new Map<string, number>()
+    const canonSelf = canonicalizeId(m.id)
     const hits = await searcher.neighbors(m.body)
     for (const r of hits) {
-      const id = idFromHit(r)
-      if (id === m.id || !byId.has(id)) continue
-      scores.set(id, r.score)
+      const canonId = canonicalizeId(idFromHit(r))
+      if (canonId === canonSelf) continue
+      const neighbor = canonById.get(canonId)
+      if (!neighbor) continue
+      scores.set(neighbor.id, r.score)
     }
     neighborScore.set(m.id, scores)
   }
