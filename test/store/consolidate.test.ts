@@ -22,6 +22,7 @@ import type { Result } from '../../src/proxy/types.ts'
 import type { SalienceScore } from '../../src/salience/types.ts'
 import {
   type ActiveMemory,
+  canonicalizeId,
   clusterMemories,
   consolidateCluster,
   type MergeDecision,
@@ -104,6 +105,17 @@ function activeMem(id: string, body: string, overrides: Partial<ActiveMemory> = 
 
 const hit = (id: string, score: number): MockHit => ({ file: `qmd://memories/${id}.md`, score })
 
+/**
+ * Emit a hit whose file stem is the HANDELIZED form QMD actually stores/returns:
+ * handelize() rewrites the indexed path stem (`mem_a1b2c3`→`mem-a1b2c3`,
+ * lowercased). This reproduces the real `_`→`-` mangling that the plain `hit`
+ * helper never did — the exact shape the id-matching bug hid behind.
+ */
+const hitMangled = (id: string, score: number): MockHit => ({
+  file: `qmd://memories/${id.replace(/_/g, '-')}.md`,
+  score,
+})
+
 const EXTRACTION_CONFIG = { model: 'x', apiKey: '', baseUrl: 'x' }
 
 // ===========================================================================
@@ -138,6 +150,34 @@ describe('validateMerge', () => {
     expect(validateMerge({ action: 'FROBNICATE' })).toBeNull()
     expect(validateMerge(null)).toBeNull()
     expect(validateMerge('nope')).toBeNull()
+  })
+})
+
+// ===========================================================================
+// 1b. canonicalizeId — pure normalizer that makes underscore frontmatter ids
+// and handelized (hyphen) hit stems agree on one canonical key.
+// ===========================================================================
+
+describe('canonicalizeId', () => {
+  it('maps the underscore id and its handelized hyphen stem to the SAME key', () => {
+    expect(canonicalizeId('mem_a1b2c3')).toBe('mem-a1b2c3')
+    expect(canonicalizeId('mem-a1b2c3')).toBe('mem-a1b2c3')
+    expect(canonicalizeId('mem_a1b2c3')).toBe(canonicalizeId('mem-a1b2c3'))
+  })
+
+  it('is idempotent', () => {
+    const once = canonicalizeId('mem_a1b2c3')
+    expect(canonicalizeId(once)).toBe(once)
+  })
+
+  it('lowercases and collapses non-alphanumeric runs to a single dash', () => {
+    expect(canonicalizeId('MEM_A1B2C3')).toBe('mem-a1b2c3')
+    expect(canonicalizeId('mem__a1b2')).toBe('mem-a1b2')
+  })
+
+  it('trims leading/trailing dashes', () => {
+    expect(canonicalizeId('_mem_a1_')).toBe('mem-a1')
+    expect(canonicalizeId('--mem-a1--')).toBe('mem-a1')
   })
 })
 
@@ -177,6 +217,38 @@ describe('clusterMemories', () => {
     const clusters = await clusterMemories(mems, store)
     expect(clusters).toHaveLength(1)
     expect(clusters[0]).toHaveLength(3)
+  })
+
+  // REGRESSION (T05-FIX): real memory ids are `mem_<hex>` (underscore), but QMD
+  // handelizes the indexed path stem to `mem-<hex>` (hyphen) and returns THAT in
+  // search hits. Before the canonicalizeId fix, idFromHit's hyphen stem never
+  // matched the underscore frontmatter id, every hit was dropped, and clustering
+  // silently produced ZERO clusters on every real wallet. This test seeds
+  // realistic ids and returns their neighbors as MANGLED (hyphen) stems; it FAILS
+  // (0 clusters) on pre-CP2 code and PASSES now.
+  it('groups memories even when QMD returns handelized (hyphen) hit stems', async () => {
+    const mems = [
+      activeMem('mem_a1b2c3', 'Lives in Riyadh'),
+      activeMem('mem_d4e5f6', 'Based in Riyadh'),
+      activeMem('mem_07a8b9', 'Riyadh resident'),
+    ]
+    // The store returns each neighbor as its HANDELIZED stem (`_`→`-`), exactly
+    // as real QMD does — the shape the plain `hit` helper never reproduced.
+    const store = makeMockStore(() => [
+      hitMangled('mem_a1b2c3', 0.9),
+      hitMangled('mem_d4e5f6', 0.9),
+      hitMangled('mem_07a8b9', 0.9),
+    ])
+
+    const clusters = await clusterMemories(mems, store)
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0]).toHaveLength(3)
+    // Scores/clusters carry the REAL underscore ids, not the canonical match key.
+    expect(clusters[0].map((m) => m.id).sort()).toEqual([
+      'mem_07a8b9',
+      'mem_a1b2c3',
+      'mem_d4e5f6',
+    ])
   })
 
   it('leaves 3 distinct memories as singletons → zero mergeable clusters', async () => {
