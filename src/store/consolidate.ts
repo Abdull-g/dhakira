@@ -1,7 +1,11 @@
 // Off-line consolidation (Step 5). Sweeps the ACTIVE slow store, clusters
-// near-duplicate/refining memories, and (in CP2+) merges each cluster into one
-// denser memory — superseding the sources. CLS sleep-consolidation analog.
-// Idempotent + LEAVE_AS_IS-floored + supersede-only (never deletes).
+// near-duplicate memories (mutual-edge guard + raised threshold), asks the
+// model to collapse GENUINE duplicates only (scoped prompt — not cluster
+// summarization), and applies a MERGE only when verifyMergeCoverage confirms
+// the merged text is structurally lossless w.r.t. every source. MERGE is
+// structurally lossless — gated by verifyMergeCoverage; model affects yield,
+// not safety. CLS sleep-consolidation analog. Idempotent + LEAVE_AS_IS-floored
+// + supersede-only (never deletes).
 
 import { readdir, readFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
@@ -703,15 +707,17 @@ export function verifyMergeCoverage(
 // Reuses runner's writeMemoryFile + invalidateMemoryFile (no reimplementation).
 // ===========================================================================
 
-/** Outcome of a consolidation sweep. */
+/** Outcome of a consolidation sweep. Stats are honest: verifier-rejected MERGEs
+ *  count as leftAsIs, never merged; sourcesSuperseded only reflects writes that
+ *  actually applied. */
 export interface ConsolidationStats {
-  /** Clusters the model was asked to judge. */
+  /** Clusters sent through consolidateCluster (one decision each). */
   clustersFound: number
-  /** Clusters that produced a consolidated memory. */
+  /** Clusters where a MERGE passed the verifier and applyMerge succeeded. */
   merged: number
-  /** Clusters the model (or floor) left untouched. */
+  /** Clusters left untouched: model LEAVE_AS_IS, harness floor, OR verifier rejection. */
   leftAsIs: number
-  /** Source memories marked invalidatedAt (superseded) across all merges. */
+  /** Source memories marked invalidatedAt — only from genuinely-applied merges. */
   sourcesSuperseded: number
 }
 
@@ -825,10 +831,10 @@ async function reindexAfterConsolidation(store: QMDStore): Promise<void> {
 }
 
 /**
- * Apply a batch of cluster decisions: for each MERGE, write the consolidated
- * memory + supersede its sources; LEAVE_AS_IS is a no-op. After all mutations,
- * re-index the store ONCE (so the new memory is searchable and superseded
- * sources drop out of active search). Returns the run's stats.
+ * Apply a batch of cluster decisions. LEAVE_AS_IS is a no-op (leftAsIs++).
+ * MERGE runs verifyMergeCoverage first — a rejection is downgraded to leftAsIs++
+ * with no write. Only verifier-passing MERGEs call applyMerge (write +
+ * supersede). After all mutations, re-index the store ONCE. Returns honest stats.
  */
 export async function applyConsolidation(
   walletDir: string,
@@ -878,10 +884,15 @@ export async function applyConsolidation(
 // ===========================================================================
 
 /**
- * Run one off-line consolidation sweep over the wallet's active slow store:
- * enumerate active memories → cluster by similarity → ask the model MERGE /
- * LEAVE_AS_IS per cluster → apply (write consolidated memory + supersede
- * sources) → re-index → stats. Reuses the WARM extraction handle via
+ * Run one off-line consolidation sweep over the wallet's active slow store.
+ * Pipeline (end-to-end):
+ *   1. loadActiveMemories — enumerate ACTIVE slow-store memories
+ *   2. clusterMemories — mutual-edge clustering at threshold 0.54 (CP2 guard)
+ *   3. consolidateCluster — scoped dup-collapse prompt (CP1); model MERGE / LEAVE_AS_IS
+ *   4. applyConsolidation — verifyMergeCoverage gate (CP3) → applyMerge on pass
+ *   5. re-index (once, if any merge applied) → stats
+ * Verifier-rejected MERGEs count as leftAsIs, not merged; sourcesSuperseded only
+ * counts genuinely-applied merges. Reuses the WARM extraction handle via
  * buildExtractionHarness (NO second model). NEVER throws — any failure is
  * captured in the Result (mirrors runExtraction). An empty store is a clean
  * no-op: clustersFound = 0.
