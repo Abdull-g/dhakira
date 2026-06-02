@@ -244,11 +244,7 @@ describe('clusterMemories', () => {
     expect(clusters).toHaveLength(1)
     expect(clusters[0]).toHaveLength(3)
     // Scores/clusters carry the REAL underscore ids, not the canonical match key.
-    expect(clusters[0].map((m) => m.id).sort()).toEqual([
-      'mem_07a8b9',
-      'mem_a1b2c3',
-      'mem_d4e5f6',
-    ])
+    expect(clusters[0].map((m) => m.id).sort()).toEqual(['mem_07a8b9', 'mem_a1b2c3', 'mem_d4e5f6'])
   })
 
   it('leaves 3 distinct memories as singletons → zero mergeable clusters', async () => {
