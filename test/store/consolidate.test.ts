@@ -28,6 +28,7 @@ import {
   type MergeDecision,
   runConsolidation,
   validateMerge,
+  verifyMergeCoverage,
 } from '../../src/store/consolidate.ts'
 
 // ---------------------------------------------------------------------------
@@ -150,6 +151,75 @@ describe('validateMerge', () => {
     expect(validateMerge({ action: 'FROBNICATE' })).toBeNull()
     expect(validateMerge(null)).toBeNull()
     expect(validateMerge('nope')).toBeNull()
+  })
+})
+
+// ===========================================================================
+// 1a. verifyMergeCoverage — THE VERIFIER (CP3). Pure, deterministic, model-free
+// coverage gate: a MERGE is lossless or it is rejected. This is the structural
+// floor that makes data loss impossible regardless of model quality.
+// ===========================================================================
+
+describe('verifyMergeCoverage (deterministic, model-free coverage gate)', () => {
+  const src = (id: string, body: string) => activeMem(id, body)
+
+  it('(1) OK when the merged text covers every salient unit from all sources', () => {
+    const sources = [src('m1', 'Lives in Riyadh'), src('m2', 'Works as a backend engineer')]
+    const merged = 'Lives in Riyadh and works as a backend engineer'
+    expect(verifyMergeCoverage(sources, merged)).toEqual({ ok: true })
+  })
+
+  it('(2) FAILS when the merge drops a NUMBER (numbers are mandatory)', () => {
+    const sources = [src('m1', 'Has 2 cats'), src('m2', 'Owns 2 cats at home')]
+    const result = verifyMergeCoverage(sources, 'Has cats at home') // drops "2"
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.missing).toContain('2')
+  })
+
+  // THE data-loss regression for tonight's bug: a Riyadh merge that ABSORBS
+  // (drops) the coffee fact. The verifier MUST fail-closed here.
+  it('(3) FAILS when the merge drops a fact/entity — the coffee data-loss regression', () => {
+    const sources = [src('m1', 'Lives in Riyadh'), src('m2', 'Drinks coffee black')]
+    const result = verifyMergeCoverage(sources, 'Lives in Riyadh') // coffee fact vanished
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.missing).toContain('coffee')
+  })
+
+  it('(4) OK for a pure paraphrase reword (filler differs; numbers/entities intact)', () => {
+    const sources = [src('m1', 'Resides in Riyadh'), src('m2', 'Lives in Riyadh')]
+    // "resides" reworded to "lives" — a single generic swap, within tolerance.
+    expect(verifyMergeCoverage(sources, 'Lives in Riyadh')).toEqual({ ok: true })
+  })
+
+  it('(5a) ignores stopwords — dropping only glue words still covers', () => {
+    const sources = [src('m1', 'Lives in the Riyadh area')]
+    expect(verifyMergeCoverage(sources, 'Lives Riyadh area')).toEqual({ ok: true })
+  })
+
+  it('(5b) treats a capitalized name as a mandatory entity', () => {
+    const sources = [src('m1', 'Works with Sarah')]
+    const dropped = verifyMergeCoverage(sources, 'Works alone')
+    expect(dropped.ok).toBe(false)
+    if (dropped.ok) return
+    expect(dropped.missing).toContain('sarah')
+    // The same name preserved → OK.
+    expect(verifyMergeCoverage(sources, 'Works closely with Sarah')).toEqual({ ok: true })
+  })
+
+  it('(5c) tolerates ONE reworded generic content word, rejects two', () => {
+    const sources = [src('m1', 'Enjoys hiking and camping outdoors')]
+    expect(verifyMergeCoverage(sources, 'Enjoys hiking outdoors')).toEqual({ ok: true })
+    expect(verifyMergeCoverage(sources, 'Enjoys hiking').ok).toBe(false)
+  })
+
+  it('(5d) flags a DROPPED negation (negators are not stopwords)', () => {
+    const sources = [src('m1', 'Does not use Windows')]
+    const result = verifyMergeCoverage(sources, 'Uses Windows') // "not" dropped → flip
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.missing).toContain('not')
   })
 })
 
@@ -359,9 +429,12 @@ function sourceRecord(id: string, text: string): MemoryRecord {
   }
 }
 
+// Lossless w.r.t. the three seeded sources (covers lives/Riyadh/Saudi/Arabia/
+// based/backend/engineer) so it passes the CP3 verifier on the happy path —
+// the realistic shape of a correct merge.
 const MERGE_DECISION: MergeDecision = {
   action: 'MERGE',
-  text: 'Lives in Riyadh, Saudi Arabia, and works as a backend engineer',
+  text: 'Lives in Riyadh, Saudi Arabia, and is a Riyadh-based backend engineer',
   category: 'IDENTITY',
 }
 
@@ -431,5 +504,53 @@ describe('runConsolidation (mocked backend + fake harness, no models)', () => {
     // surviving consolidated memory has no original neighbor → nothing to merge.
     expect(run2.value.merged).toBe(0)
     expect(run2.value.sourcesSuperseded).toBe(0)
+  })
+})
+
+// ===========================================================================
+// 6. runConsolidation verifier gate — a LOSSY merge proposed by the model is
+// REJECTED at the write boundary, counted as leftAsIs, and supersedes nothing.
+// End-to-end proof that data loss is structurally impossible (the tonight bug).
+// ===========================================================================
+
+describe('runConsolidation verifier gate (lossy merge is structurally rejected)', () => {
+  let walletDir: string
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    walletDir = await mkdtemp(join(tmpdir(), 'consolidate-verif-'))
+    // Two DISTINCT facts a bad model might over-merge — the coffee scenario.
+    await writeMemoryFile(walletDir, sourceRecord('mem_loc', 'Lives in Riyadh'))
+    await writeMemoryFile(walletDir, sourceRecord('mem_cof', 'Drinks coffee black'))
+  })
+
+  afterEach(async () => {
+    await rm(walletDir, { recursive: true, force: true })
+  })
+
+  // Both seeds reported as mutual high-score neighbors so they cluster.
+  const mutualStore = () => makeMockStore(() => [hit('mem_loc', 0.9), hit('mem_cof', 0.9)])
+
+  it('rejects a merge that drops the coffee fact → leftAsIs, sources untouched', async () => {
+    // A bad model MERGES the two but its text silently drops the coffee fact.
+    const lossy: MergeDecision = { action: 'MERGE', text: 'Lives in Riyadh', category: 'IDENTITY' }
+    vi.mocked(buildExtractionHarness).mockReturnValue(asHarness(new FakeHarness(lossy)))
+
+    const result = await runConsolidation(walletDir, mutualStore(), EXTRACTION_CONFIG)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.merged).toBe(0)
+    expect(result.value.leftAsIs).toBe(1)
+    expect(result.value.sourcesSuperseded).toBe(0)
+
+    const memDir = join(walletDir, 'memories')
+    // Both sources remain ACTIVE (not invalidated) — nothing was superseded.
+    for (const id of ['mem_loc', 'mem_cof']) {
+      const content = await readFile(join(memDir, `${id}.md`), 'utf8')
+      expect(content).toMatch(/^invalidatedAt: null$/m)
+    }
+    // No consolidated memory was written — still just the two originals.
+    const files = (await readdir(memDir)).filter((f) => f.endsWith('.md'))
+    expect(files).toHaveLength(2)
   })
 })

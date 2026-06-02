@@ -554,6 +554,150 @@ export async function consolidateCluster(
 }
 
 // ===========================================================================
+// THE VERIFIER — the structural, model-free safety floor (CP3).
+//
+// A MERGE may only become a write if its text COVERS every salient unit from
+// ALL source memories. This makes data loss IMPOSSIBLE regardless of model
+// quality: a model can over-merge or be dumb, but it CANNOT make a fact vanish,
+// because verifyMergeCoverage re-checks the merged text against the sources and
+// REJECTS (→ LEAVE_AS_IS) any merge that drops a salient unit. Model quality
+// therefore affects YIELD (how many dups collapse), never SAFETY (whether a
+// fact survives). This is the cold-wallet promise in code.
+//
+// Coverage model (v1, deterministic, conservative):
+//   - Tokenize: lowercase, split on non-alphanumeric runs, drop a small
+//     stopword list. KEEP numbers, capitalized entity words, content words.
+//   - Every salient unit present in ANY source MUST appear in the merged text.
+//   - Numbers and entity-like tokens are MANDATORY: any missing → FAIL.
+//   - Generic content words get a small miss tolerance (GENERIC_MISS_TOLERANCE),
+//     and ONLY when no number/entity is missing — a legitimate paraphrase merge
+//     rewords a stray filler word.
+//
+// KNOWN v1 GAPS (documented, accepted):
+//   (1) Lexical coverage does NOT catch negation FLIPS / semantic inversions
+//       that REWORD the negation ("likes X" vs "rarely likes X", or double
+//       negatives). We treat negators ("not"/"no"/"never"/...) as MANDATORY, so
+//       a DROPPED negation ("does not use X" → "uses X") fails closed reliably;
+//       only a reworded/semantic inversion slips. Acceptable in v1 because
+//       (a) the dup-collapse SCOPE (CP1) only targets HIGH-similarity same-fact
+//       pairs, where an inversion is out of scope, and (b) the asymmetry default
+//       is LEAVE_AS_IS.
+//   (2) Entity detection uses NON-sentence-initial capitalization, so a name
+//       that ONLY ever appears at a sentence start is treated as a generic word.
+//       Conservative: the cost is YIELD, and dup sources almost always repeat an
+//       entity mid-phrase ("in Riyadh", "based in Riyadh").
+// TODO(T05C): harden with an entailment/NLI check when we move beyond pure-lexical.
+// ===========================================================================
+
+/**
+ * Small inline stopword list — glue/filler that a paraphrase legitimately
+ * rewords. NEGATORS are deliberately EXCLUDED here and treated as MANDATORY
+ * (see VERIFIER_NEGATORS) so a dropped negation fails closed.
+ */
+const VERIFIER_STOPWORDS: ReadonlySet<string> = new Set(
+  (
+    'a an the is are was were be been being am in on at of to for with as by from into about ' +
+    'and or but nor so yet than then that this these those it its they them their ' +
+    'he she his her him i you we us me my your our has have had do does did will would can ' +
+    'could should may might must also too very there here'
+  ).split(' '),
+)
+
+/**
+ * Negation tokens — treated as MANDATORY (zero miss tolerance) so a DROPPED
+ * negation ("does not use X" → "uses X") always fails the verifier. Does NOT
+ * catch a reworded/flipped negation (gap (1) above). Apostrophe contractions
+ * are split by the tokenizer ("doesn't" → "doesn"/"t"), so the negation carrier
+ * is lost there; the plain-typed forms ("dont"/"cant") are still covered.
+ */
+const VERIFIER_NEGATORS: ReadonlySet<string> = new Set(
+  'not no never none neither without cannot dont doesnt didnt wont cant isnt arent'.split(' '),
+)
+
+/**
+ * Tolerance for MISSING generic content words — applied ONLY when no number or
+ * entity is missing. A legitimate dup paraphrase may reword at most a stray
+ * synonym; losing two or more distinct content words signals a real fact (or
+ * fact-fragment) being dropped and is rejected. Deliberately conservative
+ * (favor LEAVE_AS_IS); a remote re-cal can tune it.
+ */
+const GENERIC_MISS_TOLERANCE = 1
+
+/** Split text into raw alphanumeric word tokens (original case kept for entity detection). */
+function splitWords(text: string): string[] {
+  return text.split(/[^A-Za-z0-9]+/).filter((w) => w.length > 0)
+}
+
+/** A token carrying a digit is a number (age/date/count) — always mandatory. */
+function isNumberToken(raw: string): boolean {
+  return /[0-9]/.test(raw)
+}
+
+interface SourceUnits {
+  /** Every normalized salient unit across all sources. */
+  all: Set<string>
+  /** The subset that is MANDATORY (a number or an entity) — zero miss tolerance. */
+  mandatory: Set<string>
+}
+
+/** Collect normalized salient units from all sources, flagging numbers/entities as mandatory. */
+function collectSourceUnits(sources: ActiveMemory[]): SourceUnits {
+  const all = new Set<string>()
+  const mandatory = new Set<string>()
+  for (const s of sources) {
+    const words = splitWords(s.body)
+    words.forEach((w, idx) => {
+      const norm = w.toLowerCase()
+      if (VERIFIER_STOPWORDS.has(norm)) return
+      all.add(norm)
+      // Entity heuristic: capitalized AND not the body-initial token (the lead
+      // word is usually a sentence-start verb, not a name). Over-includes
+      // mid-text capitalized words — the SAFE direction (more mandatory).
+      const entity = idx > 0 && /^[A-Z]/.test(w)
+      if (isNumberToken(w) || entity || VERIFIER_NEGATORS.has(norm)) mandatory.add(norm)
+    })
+  }
+  return { all, mandatory }
+}
+
+/** Normalized token set present in the merged text (stopwords harmlessly included). */
+function mergedTokenSet(mergedText: string): Set<string> {
+  return new Set(splitWords(mergedText).map((w) => w.toLowerCase()))
+}
+
+/**
+ * Deterministic, model-free coverage check (see section header). Returns
+ * { ok: true } when the merged text covers every salient unit from the sources
+ * (numbers + entities mandatory; generic words within GENERIC_MISS_TOLERANCE),
+ * else { ok: false, missing } listing every dropped unit for LOUD logging. Pure:
+ * no I/O, no model, no throw — the same inputs always yield the same verdict.
+ */
+export function verifyMergeCoverage(
+  sources: ActiveMemory[],
+  mergedText: string,
+): { ok: true } | { ok: false; missing: string[] } {
+  const { all, mandatory } = collectSourceUnits(sources)
+  const merged = mergedTokenSet(mergedText)
+
+  const missing: string[] = []
+  let missingMandatory = 0
+  let missingGeneric = 0
+  for (const unit of all) {
+    if (merged.has(unit)) continue
+    missing.push(unit)
+    if (mandatory.has(unit)) missingMandatory++
+    else missingGeneric++
+  }
+
+  if (missing.length === 0) return { ok: true }
+  // Any dropped number/entity is fatal; generic drops fail past the tolerance.
+  if (missingMandatory > 0 || missingGeneric > GENERIC_MISS_TOLERANCE) {
+    return { ok: false, missing: missing.sort() }
+  }
+  return { ok: true }
+}
+
+// ===========================================================================
 // Apply: write the consolidated memory + supersede the sources. Mechanical and
 // supersede-ONLY — sources are marked invalidatedAt (reversible), NEVER deleted.
 // Reuses runner's writeMemoryFile + invalidateMemoryFile (no reimplementation).
@@ -701,6 +845,20 @@ export async function applyConsolidation(
 
   for (const { cluster, decision } of decisions) {
     if (decision.action !== 'MERGE') {
+      stats.leftAsIs++
+      continue
+    }
+    // STRUCTURAL safety gate (CP3) — at the write boundary, the closest seam to
+    // the irreversible action. A MERGE may only be applied if its text is
+    // LOSSLESS w.r.t. the sources; a verifier rejection is downgraded to
+    // LEAVE_AS_IS (counted as such, never written, sources untouched), so no
+    // model can drop a salient unit regardless of what it returned.
+    const coverage = verifyMergeCoverage(cluster, decision.text)
+    if (!coverage.ok) {
+      logger.warn('merge rejected by verifier — would drop salient units', {
+        ids: cluster.map((m) => m.id),
+        missing: coverage.missing,
+      })
       stats.leftAsIs++
       continue
     }
