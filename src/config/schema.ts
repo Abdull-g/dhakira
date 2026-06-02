@@ -30,6 +30,12 @@ export interface WalletConfig {
     apiKey: string
     /** Base URL for extraction LLM API */
     baseUrl: string
+    /**
+     * Run an off-line consolidation sweep after extraction (Step 5). Default
+     * false — the engine + `dhakira consolidate` CLI ship now; auto-in-pipeline
+     * stays DARK until it's been observed on real data.
+     */
+    consolidate?: boolean
   }
 
   injection: {

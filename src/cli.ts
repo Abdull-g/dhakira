@@ -402,6 +402,7 @@ function printHelp(): void {
     ${c.cyan('record')}     Save a fact to your memory ("dhakira record "fact"")
     ${c.cyan('search')}     Search your captured memories ("dhakira search "query"")
     ${c.cyan('extract')}    Regenerate your profile from captured conversations
+    ${c.cyan('consolidate')} Distill redundant memories into denser ones
     ${c.cyan('reset')}      Delete your wallet and start fresh
     ${c.cyan('help')}       Show this help message
 
@@ -796,6 +797,42 @@ ${c.dim('───────────────────────�
 `)
 }
 
+async function commandConsolidate(): Promise<void> {
+  console.log(`\n${c.bold('Consolidating memories...')}\n`)
+
+  const { loadConfig } = await import('./config/loader.js')
+  const configResult = await loadConfig()
+  if (!configResult.ok) {
+    console.error(c.red(`Failed to load config: ${configResult.error.message}`))
+    process.exit(1)
+  }
+  const config = configResult.value
+
+  const { createWalletStore } = await import('./retrieval/store.js')
+  const storeResult = await createWalletStore(config.walletDir)
+  if (!storeResult.ok) {
+    console.error(c.red(`Failed to initialize store: ${storeResult.error.message}`))
+    process.exit(1)
+  }
+
+  const { runConsolidation } = await import('./store/consolidate.js')
+  const result = await runConsolidation(config.walletDir, storeResult.value, config.extraction)
+
+  if (!result.ok) {
+    console.error(c.red(`Consolidation failed: ${result.error.message}`))
+    process.exit(1)
+  }
+
+  const s = result.value
+  console.log(`${c.bold('Consolidation complete')}
+${c.dim('────────────────────────────────')}
+  Clusters found:      ${c.bold(String(s.clustersFound))}
+  Merged:              ${c.green(String(s.merged))}
+  Left as-is:          ${c.bold(String(s.leftAsIs))}
+  Sources superseded:  ${c.yellow(String(s.sourcesSuperseded))}
+`)
+}
+
 function joinPositional(args: string[]): string {
   return args.join(' ').trim()
 }
@@ -977,6 +1014,9 @@ async function run(): Promise<void> {
       break
     case 'extract':
       await commandExtract()
+      break
+    case 'consolidate':
+      await commandConsolidate()
       break
     case 'help':
     case '--help':

@@ -98,8 +98,11 @@ export function buildMemoryContent(memory: MemoryRecord): string {
     `validFrom: ${memory.validFrom.toISOString()}`,
     `invalidatedAt: ${memory.invalidatedAt ? memory.invalidatedAt.toISOString() : 'null'}`,
     `expiresAt: ${memory.expiresAt ? memory.expiresAt.toISOString() : 'null'}`,
-    '---',
   ]
+  // Additive + backward-compat: only EMIT this line when true, so a normal
+  // (non-consolidated) memory produces byte-identical frontmatter to pre-T05.
+  if (memory.consolidated) lines.push('consolidated: true')
+  lines.push('---')
   return `${lines.join('\n')}\n\n${memory.text}`
 }
 
@@ -154,13 +157,29 @@ export function readMemoryExpiresAt(content: string): Date | null {
   }
 }
 
-async function writeMemoryFile(walletDir: string, memory: MemoryRecord): Promise<void> {
+/**
+ * Read the `consolidated` marker from a memory file's frontmatter. Backward-
+ * compatible: pre-T05 memory files have no such line → false. Only the literal
+ * `true` counts. Consumed by consolidation's loadActiveMemories (idempotency).
+ */
+export function readMemoryConsolidated(content: string): boolean {
+  const match = content.match(/^---\n([\s\S]*?)\n---/)
+  if (!match?.[1]) return false
+  try {
+    const parsed = parse(match[1]) as Record<string, unknown>
+    return parsed.consolidated === true || String(parsed.consolidated ?? '') === 'true'
+  } catch {
+    return false
+  }
+}
+
+export async function writeMemoryFile(walletDir: string, memory: MemoryRecord): Promise<void> {
   const memoriesDir = join(walletDir, 'memories')
   await mkdir(memoriesDir, { recursive: true })
   await writeFile(join(memoriesDir, `${memory.id}.md`), buildMemoryContent(memory), 'utf8')
 }
 
-async function invalidateMemoryFile(walletDir: string, memoryId: string): Promise<void> {
+export async function invalidateMemoryFile(walletDir: string, memoryId: string): Promise<void> {
   const filePath = join(walletDir, 'memories', `${memoryId}.md`)
   const content = await readFile(filePath, 'utf8')
   const updated = content.replace(
@@ -442,6 +461,30 @@ async function processAllConversations(
 }
 
 /**
+ * Off-line consolidation sweep (Step 5), gated behind extraction.consolidate
+ * (DEFAULT FALSE → dark). Fully non-fatal: a consolidation failure must NEVER
+ * abort extraction. The dynamic import avoids a static runner↔consolidate cycle
+ * (consolidate imports writeMemoryFile/invalidateMemoryFile from here).
+ */
+async function maybeConsolidate(
+  walletDir: string,
+  store: QMDStore,
+  config: WalletConfig['extraction'],
+): Promise<void> {
+  if (!config.consolidate) return
+  const logger = createLogger('extraction')
+  try {
+    const { runConsolidation } = await import('../store/consolidate.js')
+    const cr = await runConsolidation(walletDir, store, config)
+    if (!cr.ok) logger.warn('consolidation failed (non-fatal)', { error: cr.error.message })
+  } catch (err) {
+    logger.warn('consolidation failed (non-fatal)', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/**
  * Run the full extraction pipeline:
  * 1. Find unprocessed conversations (tracked in .extraction-state.json)
  * 2. Skip conversations with < 3 messages or flagged incognito
@@ -496,6 +539,11 @@ export async function runExtraction(
         error: err instanceof Error ? err.message : String(err),
       })
     }
+
+    // Off-line consolidation sweep (Step 5), gated + dark by default. Runs
+    // BEFORE regenerateProfile so the profile is built from the already-
+    // consolidated store. Extracted to a helper to keep runExtraction simple.
+    await maybeConsolidate(walletDir, store, config)
 
     await regenerateProfile(walletDir, config)
   }

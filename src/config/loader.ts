@@ -100,6 +100,8 @@ function mergeWithDefaults(raw: unknown): WalletConfig {
       model: getString(extractionRaw.model, d.extraction.model),
       apiKey: resolveEnvKey(getString(extractionRaw.apiKey, d.extraction.apiKey)),
       baseUrl: getString(extractionRaw.baseUrl, d.extraction.baseUrl),
+      // Missing → false (dark by default).
+      consolidate: getBoolean(extractionRaw.consolidate, d.extraction.consolidate ?? false),
     },
     injection: {
       maxTokens: getNumber(injectionRaw.maxTokens, d.injection.maxTokens),

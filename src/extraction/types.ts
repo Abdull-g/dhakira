@@ -58,4 +58,6 @@ export interface MemoryRecord {
   invalidatedAt: Date | null
   /** When this memory becomes forget-eligible (Step 6). null = durable. */
   expiresAt: Date | null
+  /** True if this memory was produced by a consolidation sweep (Step 5). Absent on all pre-T05 memories. */
+  consolidated?: boolean
 }

@@ -29,6 +29,7 @@ export function getDefaults(): WalletConfig {
       model: 'gpt-4o-mini',
       apiKey: '',
       baseUrl: 'https://api.openai.com/v1',
+      consolidate: false,
     },
 
     injection: {
