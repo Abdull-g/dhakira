@@ -44,16 +44,19 @@ const VALID_CONFIDENCES: readonly ExtractedFact['confidence'][] = ['HIGH', 'MEDI
 
 /**
  * Minimum HYBRID search score for two memories to be grouped as consolidation
- * candidates. ⚠️ UNVALIDATED — PENDING REMOTE CALIBRATION. An earlier 0.5 was
- * derived from BM25's |bm25|/(1+|bm25|) mapping, which does NOT transfer to the
- * hybrid (vector + rerank) score distribution we now query against. The hybrid
- * models can't run on the dev host (8GB Intel) — this number must be measured on
- * REMOTE compute before it's trusted. It is a cheap recall PREFILTER that MUST
- * err toward over-INCLUSION (catch candidates, let the model reject) — the MODEL
- * + LEAVE_AS_IS floor (CP2) is the real safety net. Module constant (NOT config)
- * so it's trivially tunable once a real wallet is measured.
+ * candidates. Raised 0.5 → 0.54 after the 2026-06-02 re-calibration (post
+ * T05-FIX): the unrelated singletons that were being chained into clusters
+ * scored 0.516–0.517, while genuine near-duplicates scored ~0.554–0.558. 0.54
+ * sits squarely in that gap — singletons now fall BELOW it, true dups stay
+ * ABOVE. Still measured only on REMOTE compute (the hybrid vector+rerank models
+ * can't run on the 8GB Intel dev host), and still a cheap recall PREFILTER —
+ * but it no longer has to over-include blindly: the MUTUAL-edge guard (see
+ * clusterMemories) drops weak one-way chains, the dup-collapse prompt (CP1)
+ * narrows intent, and the deterministic verifier (CP3) is the real, model-free
+ * floor against data loss. Module constant (NOT config) so it's trivially
+ * tunable once a real wallet is measured.
  */
-const CLUSTER_SCORE_THRESHOLD = 0.5
+const CLUSTER_SCORE_THRESHOLD = 0.54
 
 /** Top-N neighbors pulled per memory (same limit update.ts uses for dedup search). */
 const CLUSTER_NEIGHBOR_LIMIT = 5
@@ -373,12 +376,14 @@ function selectMergeableClusters(components: ActiveMemory[][]): ActiveMemory[][]
  * Group active memories into consolidation-candidate clusters by semantic
  * similarity. For each memory we pull its top neighbors via HYBRID search
  * (store.search on the `memories` collection — vector half catches paraphrase
- * drift; degrades to BM25 searchLex if models are unavailable). An
- * EITHER-direction edge is formed when one memory appears in the other's top-N
- * neighbors above the threshold;
- * connected components become clusters (transitive grouping is intentional —
- * the model arbitrates). The threshold is a cheap recall prefilter biased toward
- * over-inclusion; the real merge/leave call is the model's (CP2).
+ * drift; degrades to BM25 searchLex if models are unavailable). A MUTUAL
+ * (bidirectional) edge is formed only when EACH memory appears in the OTHER's
+ * top-N neighbors at score >= threshold (CP2 guard — see the union loop). Weak
+ * one-way edges (a lexical hub pulling in a memory that does not pull it back)
+ * are dropped, so unrelated memories no longer chain transitively into one
+ * cluster. Connected components of the surviving mutual edges become clusters;
+ * the scoped prompt (CP1) and the deterministic verifier (CP3) make any
+ * resulting MERGE lossless regardless of the model.
  *
  * Idempotency guard: a cluster is sent to the model only if it contains at least
  * one ORIGINAL (non-consolidated) memory — a prior consolidation output only
@@ -393,17 +398,25 @@ export async function clusterMemories(
   const byId = new Map(memories.map((m) => [m.id, m]))
   const neighborScore = await buildNeighborScores(memories, store, byId)
 
-  // Union-Find over EITHER-direction edges: A and B join if EITHER appears in
-  // the other's top-N neighbors with score >= threshold (BM25 is asymmetric, so
-  // requiring both directions would silently drop real pairs). Connected
-  // components mean A~B~C groups {A,B,C} transitively even if A and C aren't
-  // directly linked — intentional; the MODEL decides if all three truly merge.
+  // Union-Find over MUTUAL (bidirectional) edges: A and B join ONLY if EACH
+  // appears in the OTHER's top-N neighbors at score >= threshold. The map is
+  // neighborScore[query][hit], so we require neighborScore[A][B] >= T AND
+  // neighborScore[B][A] >= T (bidirectional confirmation). This is the CP2
+  // guard: a SINGLE-direction edge (the kind a lexical hub creates — it pulls
+  // in a memory that does NOT pull it back) is dropped, so weak transitive
+  // chains (A~B~C linked only one-way) no longer fuse unrelated memories into
+  // one cluster — the bug that absorbed the "coffee black" fact. Tradeoff: on
+  // the BM25 lex fallback (asymmetric, near-exact-dup recall only) a real
+  // one-way dup may now miss the union — but that only lowers YIELD, never
+  // SAFETY, and the genuine-dup case is symmetric enough on the hybrid path.
   const uf = new UnionFind(memories.map((m) => m.id))
   for (const m of memories) {
     const out = neighborScore.get(m.id)
     if (!out) continue
     for (const [other, score] of out) {
-      if (score >= CLUSTER_SCORE_THRESHOLD) uf.union(m.id, other)
+      if (score < CLUSTER_SCORE_THRESHOLD) continue
+      const back = neighborScore.get(other)?.get(m.id) ?? 0
+      if (back >= CLUSTER_SCORE_THRESHOLD) uf.union(m.id, other)
     }
   }
 

@@ -280,6 +280,61 @@ describe('clusterMemories', () => {
     const clusters = await clusterMemories(mems, store)
     expect(clusters).toHaveLength(0)
   })
+
+  // CP2 (a): a genuine MUTUAL near-dup pair still clusters. Scores sit in the
+  // re-cal near-dup band (~0.554–0.558), ABOVE the raised 0.54 threshold, and
+  // each memory appears in the OTHER's neighbors → bidirectional edge survives.
+  it('clusters a mutual near-dup pair whose scores are in the near-dup band', async () => {
+    const mems = [activeMem('mem_a', 'Lives in Riyadh'), activeMem('mem_b', 'Based in Riyadh')]
+    // Each query returns the other above 0.54 (mutual) — true near-dups.
+    const store = makeMockStore((query) =>
+      query === 'Lives in Riyadh' ? [hit('mem_b', 0.556)] : [hit('mem_a', 0.556)],
+    )
+
+    const clusters = await clusterMemories(mems, store)
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0].map((m) => m.id).sort()).toEqual(['mem_a', 'mem_b'])
+  })
+
+  // CP2 (b): the regression for tonight's chaining bug. B is a lexical hub that
+  // pulls in C one-way (B→C high), but C does NOT pull B back (no C→B edge), and
+  // A,C are unrelated. Under the OLD either-direction logic this fused {A,B,C}
+  // and absorbed the "coffee black" fact. The MUTUAL-edge guard drops the
+  // one-way B–C link, so C stays a separate singleton — A+B cluster alone.
+  it('does NOT chain an A~B~C where the B–C link is one-way (coffee-fact regression)', async () => {
+    const mems = [
+      activeMem('mem_a', 'Lives in Riyadh'),
+      activeMem('mem_b', 'Based in Riyadh'),
+      activeMem('mem_c', 'Drinks coffee black'),
+    ]
+    const store = makeMockStore((query) => {
+      // A ↔ B mutual; B → C one-way (hub); C → nothing.
+      if (query === 'Lives in Riyadh') return [hit('mem_b', 0.9)]
+      if (query === 'Based in Riyadh') return [hit('mem_a', 0.9), hit('mem_c', 0.9)]
+      return [] // 'Drinks coffee black' returns no neighbors → no C→B edge
+    })
+
+    const clusters = await clusterMemories(mems, store)
+    // Only {A,B} survives; C ("coffee black") is NOT absorbed.
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0]).toHaveLength(2)
+    expect(clusters[0].map((m) => m.id).sort()).toEqual(['mem_a', 'mem_b'])
+    expect(clusters[0].some((m) => m.id === 'mem_c')).toBe(false)
+  })
+
+  // CP2 (c): singletons whose mutual scores sit in the re-cal singleton band
+  // (0.516–0.517) fall BELOW the raised 0.54 threshold → never cluster. At the
+  // OLD 0.5 threshold these would have unioned into a spurious cluster.
+  it('never clusters singletons scoring in the 0.516–0.517 singleton band', async () => {
+    const mems = [activeMem('mem_a', 'Lives in Riyadh'), activeMem('mem_b', 'Owns a bicycle')]
+    // Mutual, but both below 0.54 — the kind of weak link the re-cal flagged.
+    const store = makeMockStore((query) =>
+      query === 'Lives in Riyadh' ? [hit('mem_b', 0.517)] : [hit('mem_a', 0.516)],
+    )
+
+    const clusters = await clusterMemories(mems, store)
+    expect(clusters).toHaveLength(0)
+  })
 })
 
 // ===========================================================================
