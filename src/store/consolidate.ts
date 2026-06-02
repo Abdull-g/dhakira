@@ -197,6 +197,21 @@ interface NeighborHit {
   filepath?: string
 }
 
+/**
+ * Canonicalize a memory id for cross-matching QMD search hits against our
+ * in-memory set. QMD's handelize() rewrites the filename stem (e.g. `_`→`-`,
+ * lowercasing) when it indexes, so a hit's stem (`mem-a1b2c3`) will not ===
+ * our frontmatter id (`mem_a1b2c3`). Normalizing BOTH sides the same way makes
+ * the comparison robust to that rewrite. Mirrors the biting part of QMD
+ * handelize (store.js): lowercase + collapse non-alphanumeric runs to '-'.
+ */
+export function canonicalizeId(id: string): string {
+  return id
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 /** Resolve the memory id from a hit's filepath (e.g. qmd://memories/mem_x.md). */
 function idFromHit(hit: NeighborHit): string {
   return basename(String(hit.file ?? hit.filepath ?? ''), '.md')
