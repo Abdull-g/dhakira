@@ -130,17 +130,38 @@ Guidance:
 Respond with ONLY valid JSON:
 {"score": 0.0, "tier": "standard", "reason": "..."}`
 
-export const CONSOLIDATE_PROMPT = `You are a memory consolidator. You are given a small CLUSTER of existing memories about ONE user that a similarity search flagged as possibly redundant. Decide whether they should be merged into a single denser memory, or left alone.
+export const CONSOLIDATE_PROMPT = `You are a memory consolidator. You are given a small CLUSTER of existing memories about ONE user that a similarity search flagged as possibly similar. Your ONLY job is to collapse genuine DUPLICATES. You are NOT a cluster summarizer — do not blend a group of related facts into one prose blob.
+
+These memories were retrieved as similar. MERGE **only if they state the SAME fact in different words** — a paraphrase, a refinement, or a near-exact duplicate. If they describe DIFFERENT, COMPLEMENTARY, or merely RELATED facts — even about the same person — return LEAVE_AS_IS. The merged text MUST preserve every distinct detail, entity, name, and number from all inputs. Never drop information. When unsure, LEAVE_AS_IS.
+
+DECISION RULES:
+- MERGE only when every memory in the cluster expresses the SAME underlying fact (duplicate, rephrasing, or one refining another with more detail).
+- Two facts that can INDEPENDENTLY be true are NOT duplicates — even about the same person, even on the same topic. Distinct or complementary → LEAVE_AS_IS. Do NOT force a merge.
+- When you MERGE, the merged text MUST preserve EVERY distinct detail across the sources — names, places, dates, numbers, qualifiers. The result is DENSER, never lossy. Do not drop information to make it shorter.
+- When in doubt, return LEAVE_AS_IS. A wrong merge can corrupt the store; leaving things alone is always safe.
+- The merged "category" must be ONE of: IDENTITY, PREFERENCE, CONTEXT, RELATIONSHIP, SKILL, EVENT.
+
+EXAMPLES:
+
+Cluster:
+1. [IDENTITY] Lives in Riyadh
+2. [IDENTITY] Based in Riyadh, Saudi Arabia
+3. [IDENTITY] Riyadh resident
+Decision: {"action": "MERGE", "text": "Lives in Riyadh, Saudi Arabia", "category": "IDENTITY"}
+(All three state the SAME fact — the user's city — just reworded. Safe to collapse, and the merge keeps "Saudi Arabia".)
+
+Cluster:
+1. [PREFERENCE] Prefers TypeScript for backend work
+2. [PREFERENCE] Prefers Python for ML work
+Decision: {"action": "LEAVE_AS_IS", "reason": "Distinct preferences for different domains — both can be true at once, not the same fact."}
+
+Cluster:
+1. [IDENTITY] Lives in Riyadh
+2. [PREFERENCE] Drinks coffee black
+Decision: {"action": "LEAVE_AS_IS", "reason": "Unrelated facts — location vs beverage preference. Merging would risk dropping one."}
 
 MEMORIES IN THIS CLUSTER:
 {memories}
-
-DECISION RULES:
-- MERGE only when the memories truly say the SAME thing or REFINE each other (duplicates, rephrasings, or one adding detail to another).
-- When you MERGE, the merged text MUST preserve EVERY distinct detail across the sources — names, dates, specifics, qualifiers. The result should be DENSER, never lossy. Do not drop information to make it shorter.
-- If the memories are actually DISTINCT facts (different topics, or facts that can independently be true), return LEAVE_AS_IS — do NOT force a merge.
-- When in doubt, return LEAVE_AS_IS. A wrong merge corrupts the store; leaving things alone is always safe.
-- The merged "category" must be ONE of: IDENTITY, PREFERENCE, CONTEXT, RELATIONSHIP, SKILL, EVENT.
 
 Respond with ONLY valid JSON, one of:
 {"action": "MERGE", "text": "<single consolidated declarative fact preserving all details>", "category": "IDENTITY"}

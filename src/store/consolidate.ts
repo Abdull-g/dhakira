@@ -412,6 +412,11 @@ export async function clusterMemories(
 
 // ===========================================================================
 // The ONE model capability: the per-cluster MERGE / LEAVE_AS_IS decision.
+// SCOPE (CP1): the prompt asks the model to collapse genuine DUPLICATES only
+// (the same fact reworded/refined) — NOT to summarize a cluster. Distinct or
+// merely related facts → LEAVE_AS_IS. The prompt conveys this; the model is NOT
+// trusted to be lossless — that is enforced structurally by the verifier (CP3),
+// so model quality affects YIELD (how many dups collapse), never SAFETY.
 // Mirrors salience.ts (buildSalienceTask + scoreSalience) EXACTLY: grammar-
 // constrained JSON, validate → retry → floor inside the harness for a
 // constrained handle; the caller catches the unconstrained hard-fail and
