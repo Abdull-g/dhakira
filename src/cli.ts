@@ -403,6 +403,7 @@ function printHelp(): void {
     ${c.cyan('search')}     Search your captured memories ("dhakira search "query"")
     ${c.cyan('extract')}    Regenerate your profile from captured conversations
     ${c.cyan('consolidate')} Distill redundant memories into denser ones
+    ${c.cyan('forget')}     Soft-forget expired + aged-superseded memories
     ${c.cyan('reset')}      Delete your wallet and start fresh
     ${c.cyan('help')}       Show this help message
 
@@ -833,6 +834,43 @@ ${c.dim('───────────────────────�
 `)
 }
 
+async function commandForget(): Promise<void> {
+  console.log(`\n${c.bold('Forgetting eligible memories...')}\n`)
+
+  const { loadConfig } = await import('./config/loader.js')
+  const configResult = await loadConfig()
+  if (!configResult.ok) {
+    console.error(c.red(`Failed to load config: ${configResult.error.message}`))
+    process.exit(1)
+  }
+  const config = configResult.value
+
+  const { createWalletStore } = await import('./retrieval/store.js')
+  const storeResult = await createWalletStore(config.walletDir)
+  if (!storeResult.ok) {
+    console.error(c.red(`Failed to initialize store: ${storeResult.error.message}`))
+    process.exit(1)
+  }
+
+  const { runForget } = await import('./store/forget.js')
+  const result = await runForget(config.walletDir, storeResult.value)
+
+  if (!result.ok) {
+    console.error(c.red(`Forget failed: ${result.error.message}`))
+    process.exit(1)
+  }
+
+  const s = result.value
+  console.log(`${c.bold('Forget complete')}
+${c.dim('────────────────────────────────')}
+  Scanned:             ${c.bold(String(s.scanned))}
+  Forgotten:           ${c.green(String(s.forgotten))}
+  Expired:             ${c.bold(String(s.byReason.expired))}
+  Superseded-aged:     ${c.yellow(String(s.byReason.supersededAged))}
+  Skipped (core):      ${c.bold(String(s.skippedCore))}
+`)
+}
+
 function joinPositional(args: string[]): string {
   return args.join(' ').trim()
 }
@@ -1017,6 +1055,9 @@ async function run(): Promise<void> {
       break
     case 'consolidate':
       await commandConsolidate()
+      break
+    case 'forget':
+      await commandForget()
       break
     case 'help':
     case '--help':

@@ -60,4 +60,6 @@ export interface MemoryRecord {
   expiresAt: Date | null
   /** True if this memory was produced by a consolidation sweep (Step 5). Absent on all pre-T05 memories. */
   consolidated?: boolean
+  /** When this memory was soft-forgotten (Step 6). Absent/null = active. Only emitted once set, so untouched files stay byte-identical. */
+  forgottenAt?: Date | null
 }

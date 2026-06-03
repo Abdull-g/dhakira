@@ -99,6 +99,7 @@ interface ParsedMemory {
   salienceTier: SalienceTier
   validFrom: Date
   invalidatedAt: string | null | undefined
+  forgottenAt: string | null | undefined
   body: string
 }
 
@@ -147,6 +148,10 @@ function parseMemoryFile(content: string, fallbackId: string): ParsedMemory | nu
       validFrom: coerceDate(fm.validFrom),
       invalidatedAt:
         fm.invalidatedAt === null ? null : fm.invalidatedAt ? String(fm.invalidatedAt) : undefined,
+      // T06: soft-forgotten memories are excluded from the active set, exactly
+      // like superseded ones. Same null/empty handling as invalidatedAt.
+      forgottenAt:
+        fm.forgottenAt === null ? null : fm.forgottenAt ? String(fm.forgottenAt) : undefined,
       body,
     }
   } catch {
@@ -177,7 +182,7 @@ export async function loadActiveMemories(walletDir: string): Promise<ActiveMemor
     try {
       const content = await readFile(filePath, 'utf8')
       const parsed = parseMemoryFile(content, basename(rel, '.md'))
-      if (!parsed || parsed.invalidatedAt || !parsed.body) continue
+      if (!parsed || parsed.invalidatedAt || parsed.forgottenAt || !parsed.body) continue
       active.push({
         id: parsed.id,
         body: parsed.body,

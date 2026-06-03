@@ -102,6 +102,9 @@ export function buildMemoryContent(memory: MemoryRecord): string {
   // Additive + backward-compat: only EMIT this line when true, so a normal
   // (non-consolidated) memory produces byte-identical frontmatter to pre-T05.
   if (memory.consolidated) lines.push('consolidated: true')
+  // Additive + backward-compat (T06): only EMIT when soft-forgotten, so an
+  // active memory produces byte-identical frontmatter to pre-T06.
+  if (memory.forgottenAt) lines.push(`forgottenAt: ${memory.forgottenAt.toISOString()}`)
   lines.push('---')
   return `${lines.join('\n')}\n\n${memory.text}`
 }
@@ -158,6 +161,50 @@ export function readMemoryExpiresAt(content: string): Date | null {
 }
 
 /**
+ * Read invalidatedAt from a memory file's frontmatter. Backward-compatible:
+ * memory files with no/`null`/empty invalidatedAt → null (still active). Mirrors
+ * readMemoryExpiresAt's null/'null'/empty handling. Step 6 (Forget) consumes
+ * this for the superseded-aged eligibility path; exposed standalone (NOT reusing
+ * the inline parse paths in consolidate.ts/profile-gen.ts) so the reader stays
+ * clean and independently unit-tested.
+ */
+export function readMemoryInvalidatedAt(content: string): Date | null {
+  const match = content.match(/^---\n([\s\S]*?)\n---/)
+  if (!match?.[1]) return null
+  try {
+    const parsed = parse(match[1]) as Record<string, unknown>
+    if (parsed.invalidatedAt === null || parsed.invalidatedAt === undefined) return null
+    const raw = String(parsed.invalidatedAt)
+    if (raw === 'null' || raw === '') return null
+    const d = new Date(raw)
+    return Number.isNaN(d.getTime()) ? null : d
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Read forgottenAt from a memory file's frontmatter. Backward-compatible:
+ * memory files with no/`null`/empty forgottenAt → null (still active). Mirrors
+ * readMemoryExpiresAt's null/'null'/empty handling. Step 6 (Forget) consumes
+ * this for the idempotency guard AND the read-path active filters.
+ */
+export function readMemoryForgottenAt(content: string): Date | null {
+  const match = content.match(/^---\n([\s\S]*?)\n---/)
+  if (!match?.[1]) return null
+  try {
+    const parsed = parse(match[1]) as Record<string, unknown>
+    if (parsed.forgottenAt === null || parsed.forgottenAt === undefined) return null
+    const raw = String(parsed.forgottenAt)
+    if (raw === 'null' || raw === '') return null
+    const d = new Date(raw)
+    return Number.isNaN(d.getTime()) ? null : d
+  } catch {
+    return null
+  }
+}
+
+/**
  * Read the `consolidated` marker from a memory file's frontmatter. Backward-
  * compatible: pre-T05 memory files have no such line → false. Only the literal
  * `true` counts. Consumed by consolidation's loadActiveMemories (idempotency).
@@ -186,6 +233,39 @@ export async function invalidateMemoryFile(walletDir: string, memoryId: string):
     /^invalidatedAt: null$/m,
     `invalidatedAt: ${new Date().toISOString()}`,
   )
+  await writeFile(filePath, updated, 'utf8')
+}
+
+/**
+ * Soft-forget a memory file (Step 6): additively stamp a `forgottenAt: <iso>`
+ * line as the LAST frontmatter line. Sibling of invalidateMemoryFile — reversible
+ * (stamp, file kept on disk), NEVER an unlink. Additive + backward-compat: files
+ * never soft-forgotten have no `forgottenAt` line and stay byte-identical.
+ *
+ * The pattern is anchored to the document-opening frontmatter block (`^---\n` +
+ * lazy `[\s\S]*?` stopping at the first closing `---`), so it stamps the last
+ * frontmatter line regardless of body content. This STRUCTURALLY can't corrupt
+ * the body — a `---` markdown horizontal rule in the text cannot be mistaken for
+ * the frontmatter fence. If the pattern doesn't match (malformed/missing
+ * frontmatter), we do NOT write: warn + skip, so we never mangle a file we don't
+ * understand. Caller guarantees idempotency (isForgetEligible skips
+ * already-forgotten), mirroring invalidateMemoryFile.
+ *
+ * NOTE(future pass): invalidateMemoryFile has the same theoretical fragility
+ * (an unanchored `^invalidatedAt: null$` line match) — out of scope for T06; flag
+ * for a later hardening pass.
+ */
+export async function softForgetMemoryFile(walletDir: string, memoryId: string): Promise<void> {
+  const filePath = join(walletDir, 'memories', `${memoryId}.md`)
+  const content = await readFile(filePath, 'utf8')
+  const pattern = /^(---\n[\s\S]*?\n)---\n/
+  if (!pattern.test(content)) {
+    createLogger('extraction').warn('soft-forget skipped: no parseable frontmatter', {
+      id: memoryId,
+    })
+    return
+  }
+  const updated = content.replace(pattern, `$1forgottenAt: ${new Date().toISOString()}\n---\n`)
   await writeFile(filePath, updated, 'utf8')
 }
 

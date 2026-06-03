@@ -34,6 +34,7 @@ const TIER_RANK: Record<SalienceTier, number> = {
 interface MemoryFrontmatter {
   confidence: string
   invalidatedAt: string | null | undefined
+  forgottenAt: string | null | undefined
   salienceTier: SalienceTier
 }
 
@@ -56,6 +57,14 @@ function parseMemoryFrontmatter(content: string): MemoryFrontmatter | null {
           ? null
           : parsed.invalidatedAt
             ? String(parsed.invalidatedAt)
+            : undefined,
+      // T06: a soft-forgotten memory must be invisible everywhere a superseded
+      // one is. Same null/empty handling as invalidatedAt.
+      forgottenAt:
+        parsed.forgottenAt === null
+          ? null
+          : parsed.forgottenAt
+            ? String(parsed.forgottenAt)
             : undefined,
       salienceTier,
     }
@@ -84,7 +93,7 @@ async function collectHighConfidenceMemories(memoriesDir: string): Promise<Resul
     try {
       const content = await readFile(join(memoriesDir, rel), 'utf8')
       const fm = parseMemoryFrontmatter(content)
-      if (!fm || fm.confidence !== 'HIGH' || fm.invalidatedAt) continue
+      if (!fm || fm.confidence !== 'HIGH' || fm.invalidatedAt || fm.forgottenAt) continue
       const body = extractMemoryBody(content)
       if (body) eligible.push({ body, tier: fm.salienceTier })
     } catch {
