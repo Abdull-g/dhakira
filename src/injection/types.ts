@@ -10,8 +10,10 @@ export interface InjectionBlock {
   tokenCount: number
   /** Number of memories included */
   memoryCount: number
-  /** Whether profile was included */
+  /** Whether the global identity (## About You) was included */
   hasProfile: boolean
+  /** Whether a scoped project doc (## Project) was included (T08) */
+  hasProject: boolean
 }
 
 export interface InjectionContext {

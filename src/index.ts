@@ -26,6 +26,7 @@ import type { WalletConfig } from './config/schema.js'
 import { createDashboardServer } from './dashboard/server.js'
 import { maybeTriggerExtraction } from './extraction/trigger.js'
 import { buildInjectionBlock } from './injection/builder.js'
+import { loadProjectDoc, projectDisplayName } from './synthesis/project-doc.js'
 import { injectIntoSystemPrompt } from './injection/injector.js'
 import { loadProfile } from './injection/profile.js'
 import { computeContextFingerprint } from './proxy/fingerprint.js'
@@ -466,6 +467,11 @@ export async function main(): Promise<void> {
       const profileResult = await loadProfile(config.walletDir)
       const profile = profileResult.ok ? profileResult.value : ''
 
+      // T08: load the scoped project doc for this request's projectId (reusing the
+      // id already resolved above). null when global-scoped or no doc exists →
+      // composition behaves exactly like pre-T08 (global + turns).
+      const projectDoc = await loadProjectDoc(config.walletDir, projectId)
+
       const searchResult = await searchTurns(store, {
         query: lastUserMessage,
         limit: config.injection.maxTurns,
@@ -476,7 +482,13 @@ export async function main(): Promise<void> {
       })
       const turns = searchResult.ok ? searchResult.value : []
 
-      const injectionBlock = buildInjectionBlock(profile, turns, config.injection)
+      const injectionBlock = buildInjectionBlock(
+        profile,
+        projectDoc,
+        turns,
+        config.injection,
+        projectDisplayName(projectId),
+      )
       if (!injectionBlock.text) return null
 
       const elapsedS = ((Date.now() - t0) / 1000).toFixed(2)

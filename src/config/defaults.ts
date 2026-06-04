@@ -37,6 +37,11 @@ export function getDefaults(): WalletConfig {
       minRelevanceScore: 0.3,
       recencyBoost: 0.3,
       maxTurns: 8,
+      // T08 per-layer soft caps within the shared 1800 ceiling. Conservative by
+      // design ("injection budget is a FEATURE, not a quota to maximize"):
+      // global ~250, project ~700, turns fill the remainder.
+      globalMaxTokens: 250,
+      projectMaxTokens: 700,
     },
 
     incognito: false,

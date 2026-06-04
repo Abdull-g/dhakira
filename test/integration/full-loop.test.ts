@@ -204,7 +204,7 @@ describe('full-loop integration', () => {
         })
         const turns = searchResult.ok ? searchResult.value : []
 
-        const injectionBlock = buildInjectionBlock('', turns, config.injection)
+        const injectionBlock = buildInjectionBlock('', null, turns, config.injection)
         if (!injectionBlock.text) return null
 
         return injectIntoSystemPrompt(normalized.systemPrompt, injectionBlock)

@@ -358,6 +358,10 @@ interface ConversationResult {
   succeeded: boolean
   rollingSummary: string
   stats: Partial<ExtractionStats>
+  /** The projectId this conversation's memories belong to (T08 scoped trigger). */
+  projectId: string
+  /** Whether this conversation actually created/updated/invalidated any memory. */
+  changedMemories: boolean
 }
 
 /** Process a single session file: clean, extract facts, decide actions, write memories */
@@ -397,7 +401,13 @@ async function processConversation(
   if (!extractResult.ok) {
     logger.warn('Extraction failed', { id: fm.id, error: extractResult.error.message })
     // Return succeeded: false so the caller knows NOT to mark this as processed
-    return { succeeded: false, rollingSummary, stats: {} }
+    return {
+      succeeded: false,
+      rollingSummary,
+      stats: {},
+      projectId: fm.projectId,
+      changedMemories: false,
+    }
   }
 
   const { facts, summaryUpdate } = extractResult.value
@@ -442,7 +452,19 @@ async function processConversation(
     }
   }
 
-  return { succeeded: true, rollingSummary: summaryUpdate, stats: partialStats }
+  const changedMemories =
+    (partialStats.memoriesCreated ?? 0) +
+      (partialStats.memoriesUpdated ?? 0) +
+      (partialStats.memoriesInvalidated ?? 0) >
+    0
+
+  return {
+    succeeded: true,
+    rollingSummary: summaryUpdate,
+    stats: partialStats,
+    projectId: fm.projectId,
+    changedMemories,
+  }
 }
 
 function mergeStats(into: ExtractionStats, partial: Partial<ExtractionStats>): void {
@@ -479,7 +501,12 @@ async function processAllConversations(
   processedIds: Set<string>,
   initialSummary: string,
   ctx: ConversationContext,
-): Promise<{ rollingSummary: string; stats: ExtractionStats; failedCount: number }> {
+): Promise<{
+  rollingSummary: string
+  stats: ExtractionStats
+  failedCount: number
+  touchedProjectIds: Set<string>
+}> {
   const logger = createLogger('extraction')
   const stats: ExtractionStats = {
     conversationsProcessed: 0,
@@ -492,6 +519,9 @@ async function processAllConversations(
   let rollingSummary = initialSummary
   let failedCount = 0
   let consecutiveFailures = 0
+  // T08: the projectIds whose live memory set changed this run → exactly the docs
+  // to rebuild (scoped, NOT every bucket).
+  const touchedProjectIds = new Set<string>()
 
   // Reconstruct sessions: 119 files → ~10 session representatives
   const sessions = await reconstructSessions(walletDir)
@@ -535,6 +565,7 @@ async function processAllConversations(
       rollingSummary = result.rollingSummary
       stats.conversationsProcessed++
       mergeStats(stats, result.stats)
+      if (result.changedMemories) touchedProjectIds.add(result.projectId)
       consecutiveFailures = 0
 
       logger.info('Conversation extracted', {
@@ -561,7 +592,7 @@ async function processAllConversations(
     }
   }
 
-  return { rollingSummary, stats, failedCount }
+  return { rollingSummary, stats, failedCount, touchedProjectIds }
 }
 
 /**
@@ -616,7 +647,7 @@ export async function runExtraction(
   }
 
   const ctx: ConversationContext = { walletDir, store, config, existingProfile }
-  const { rollingSummary, stats, failedCount } = await processAllConversations(
+  const { rollingSummary, stats, failedCount, touchedProjectIds } = await processAllConversations(
     walletDir,
     processedIds,
     state.rollingSummary,
@@ -650,6 +681,18 @@ export async function runExtraction(
     await maybeConsolidate(walletDir, store, config)
 
     await regenerateProfile(walletDir, config)
+
+    // T08: rebuild ONLY the touched (non-global) project docs through the CP3
+    // synthesis ladder. Scoped, freshness-by-rebuild. Non-fatal: a synthesis
+    // failure must never abort the extraction run.
+    try {
+      const { regenerateProjectDocs } = await import('../synthesis/regenerate.js')
+      await regenerateProjectDocs(walletDir, config, touchedProjectIds)
+    } catch (err) {
+      logger.warn('project-doc regeneration failed (non-fatal)', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
   }
 
   // Save state — only successfully processed IDs are in processedIds

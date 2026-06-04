@@ -44,7 +44,7 @@ function makeTurnResult(
 
 describe('buildInjectionBlock — empty inputs', () => {
   it('returns empty block when profile is empty and no search results', () => {
-    const block = buildInjectionBlock('', [], defaultConfig)
+    const block = buildInjectionBlock('', null, [], defaultConfig)
     expect(block.text).toBe('')
     expect(block.tokenCount).toBe(0)
     expect(block.memoryCount).toBe(0)
@@ -52,7 +52,7 @@ describe('buildInjectionBlock — empty inputs', () => {
   })
 
   it('returns empty block when profile is whitespace-only and no results', () => {
-    const block = buildInjectionBlock('   \n  ', [], defaultConfig)
+    const block = buildInjectionBlock('   \n  ', null, [], defaultConfig)
     expect(block.text).toBe('')
     expect(block.tokenCount).toBe(0)
   })
@@ -64,31 +64,31 @@ describe('buildInjectionBlock — empty inputs', () => {
 
 describe('buildInjectionBlock — structure', () => {
   it('wraps output in <dhakira_context> tags', () => {
-    const block = buildInjectionBlock('- TypeScript developer', [], defaultConfig)
+    const block = buildInjectionBlock('- TypeScript developer', null, [], defaultConfig)
     expect(block.text).toMatch(/^<dhakira_context>/)
     expect(block.text).toMatch(/<\/dhakira_context>$/)
   })
 
   it('includes ## About You section when profile is provided', () => {
-    const block = buildInjectionBlock('- TypeScript developer', [], defaultConfig)
+    const block = buildInjectionBlock('- TypeScript developer', null, [], defaultConfig)
     expect(block.text).toContain('## About You')
     expect(block.text).toContain('- TypeScript developer')
     expect(block.hasProfile).toBe(true)
   })
 
   it('omits ## About You section when profile is empty', () => {
-    const block = buildInjectionBlock('', [makeTurnResult()], defaultConfig)
+    const block = buildInjectionBlock('', null, [makeTurnResult()], defaultConfig)
     expect(block.text).not.toContain('## About You')
     expect(block.hasProfile).toBe(false)
   })
 
   it('always includes ## Relevant Past Conversations header', () => {
-    const block = buildInjectionBlock('- TypeScript developer', [], defaultConfig)
+    const block = buildInjectionBlock('- TypeScript developer', null, [], defaultConfig)
     expect(block.text).toContain('## Relevant Past Conversations')
   })
 
   it('includes both profile and turns sections when both provided', () => {
-    const block = buildInjectionBlock('- TypeScript developer', [makeTurnResult()], defaultConfig)
+    const block = buildInjectionBlock('- TypeScript developer', null, [makeTurnResult()], defaultConfig)
     expect(block.text).toContain('## About You')
     expect(block.text).toContain('## Relevant Past Conversations')
     expect(block.hasProfile).toBe(true)
@@ -103,13 +103,13 @@ describe('buildInjectionBlock — structure', () => {
 describe('buildInjectionBlock — turn entry format', () => {
   it('prefixes each turn with the [YYYY-MM-DD] date', () => {
     const result = makeTurnResult({ timestamp: '2026-03-20T10:00:00Z' })
-    const block = buildInjectionBlock('', [result], defaultConfig)
+    const block = buildInjectionBlock('', null, [result], defaultConfig)
     expect(block.text).toContain('[2026-03-20]')
   })
 
   it('includes the user message prefixed with "You:"', () => {
     const result = makeTurnResult({ userContent: 'How do I use pgBouncer?' })
-    const block = buildInjectionBlock('', [result], defaultConfig)
+    const block = buildInjectionBlock('', null, [result], defaultConfig)
     expect(block.text).toContain('You: How do I use pgBouncer?')
   })
 
@@ -117,13 +117,13 @@ describe('buildInjectionBlock — turn entry format', () => {
     const result = makeTurnResult({
       assistantContent: 'Install pgBouncer and configure pool_mode.',
     })
-    const block = buildInjectionBlock('', [result], defaultConfig)
+    const block = buildInjectionBlock('', null, [result], defaultConfig)
     expect(block.text).toContain('→ Install pgBouncer and configure pool_mode.')
   })
 
   it('collapses multi-line user messages onto one line', () => {
     const result = makeTurnResult({ userContent: 'How do I\nuse pgBouncer?' })
-    const block = buildInjectionBlock('', [result], defaultConfig)
+    const block = buildInjectionBlock('', null, [result], defaultConfig)
     // The newline in the user content should be collapsed to a space
     expect(block.text).toContain('You: How do I use pgBouncer?')
     // Verify no newline sits between "How do I" and "use pgBouncer"
@@ -133,7 +133,7 @@ describe('buildInjectionBlock — turn entry format', () => {
   it('includes short assistant response verbatim', () => {
     const shortResponse = 'Use pgBouncer.'
     const result = makeTurnResult({ assistantContent: shortResponse })
-    const block = buildInjectionBlock('', [result], defaultConfig)
+    const block = buildInjectionBlock('', null, [result], defaultConfig)
     expect(block.text).toContain(shortResponse)
   })
 })
@@ -156,21 +156,21 @@ describe('buildInjectionBlock — assistant response truncation', () => {
 
   it('truncates long assistant responses to first 2-3 sentences', () => {
     const result = makeTurnResult({ assistantContent: longResponse })
-    const block = buildInjectionBlock('', [result], defaultConfig)
+    const block = buildInjectionBlock('', null, [result], defaultConfig)
     // The sixth sentence should be cut off by the 3-sentence limit
     expect(block.text).not.toContain('Sixth, you should monitor')
   })
 
   it('preserves the first sentence of a long response', () => {
     const result = makeTurnResult({ assistantContent: longResponse })
-    const block = buildInjectionBlock('', [result], defaultConfig)
+    const block = buildInjectionBlock('', null, [result], defaultConfig)
     expect(block.text).toContain('First, you need to install pgBouncer')
   })
 
   it('does not truncate responses within the verbatim token limit', () => {
     const shortResponse = 'Use pgBouncer with pool_mode=transaction.'
     const result = makeTurnResult({ assistantContent: shortResponse })
-    const block = buildInjectionBlock('', [result], defaultConfig)
+    const block = buildInjectionBlock('', null, [result], defaultConfig)
     expect(block.text).toContain(shortResponse)
   })
 })
@@ -181,12 +181,12 @@ describe('buildInjectionBlock — assistant response truncation', () => {
 
 describe('buildInjectionBlock — token budget', () => {
   it('reports non-zero tokenCount when content is present', () => {
-    const block = buildInjectionBlock('- TypeScript developer', [makeTurnResult()], defaultConfig)
+    const block = buildInjectionBlock('- TypeScript developer', null, [makeTurnResult()], defaultConfig)
     expect(block.tokenCount).toBeGreaterThan(0)
   })
 
   it('tokenCount matches estimateTokens of the output text', () => {
-    const block = buildInjectionBlock('- TypeScript developer', [makeTurnResult()], defaultConfig)
+    const block = buildInjectionBlock('- TypeScript developer', null, [makeTurnResult()], defaultConfig)
     expect(block.tokenCount).toBe(estimateTokens(block.text))
   })
 
@@ -195,7 +195,7 @@ describe('buildInjectionBlock — token budget', () => {
       makeTurnResult({ userContent: 'Question A', turnIndex: 0 }, 0.9),
       makeTurnResult({ userContent: 'Question B', turnIndex: 1 }, 0.8),
     ]
-    const block = buildInjectionBlock('', results, defaultConfig)
+    const block = buildInjectionBlock('', null, results, defaultConfig)
     expect(block.memoryCount).toBe(2)
   })
 
@@ -216,7 +216,7 @@ describe('buildInjectionBlock — token budget', () => {
         1 - i * 0.05,
       ),
     )
-    const block = buildInjectionBlock('', results, tinyConfig)
+    const block = buildInjectionBlock('', null, results, tinyConfig)
     // Allow a small margin for the skeleton chrome which is always included
     expect(block.tokenCount).toBeLessThanOrEqual(tinyConfig.maxTokens + 30)
   })
@@ -230,7 +230,7 @@ describe('buildInjectionBlock — token budget', () => {
     }
     const low = makeTurnResult({ userContent: 'Low relevance question', turnIndex: 0 }, 0.1)
     const high = makeTurnResult({ userContent: 'High relevance question', turnIndex: 1 }, 0.99)
-    const block = buildInjectionBlock('', [low, high], tinyConfig)
+    const block = buildInjectionBlock('', null, [low, high], tinyConfig)
     if (block.memoryCount === 1) {
       expect(block.text).toContain('High relevance question')
       expect(block.text).not.toContain('Low relevance question')
@@ -247,7 +247,7 @@ describe('buildInjectionBlock — token budget', () => {
     const results = Array.from({ length: 6 }, (_, i) =>
       makeTurnResult({ userContent: `Question ${i}`, turnIndex: i }, 0.9),
     )
-    const block = buildInjectionBlock('', results, strictConfig)
+    const block = buildInjectionBlock('', null, results, strictConfig)
     expect(block.memoryCount).toBeLessThanOrEqual(2)
   })
 })
@@ -258,7 +258,7 @@ describe('buildInjectionBlock — token budget', () => {
 
 describe('buildInjectionBlock — profile only', () => {
   it('injects profile with empty turns section when no results pass', () => {
-    const block = buildInjectionBlock('- TypeScript developer', [], defaultConfig)
+    const block = buildInjectionBlock('- TypeScript developer', null, [], defaultConfig)
     expect(block.text).toContain('## About You')
     expect(block.text).toContain('- TypeScript developer')
     expect(block.text).toContain('## Relevant Past Conversations')

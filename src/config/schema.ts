@@ -39,7 +39,7 @@ export interface WalletConfig {
   }
 
   injection: {
-    /** Max tokens for entire injection block (profile + turns) */
+    /** Hard ceiling for the ENTIRE injection block — all three layers SHARE this. */
     maxTokens: number
     /** Minimum relevance score to include a turn (0-1) */
     minRelevanceScore: number
@@ -47,6 +47,18 @@ export interface WalletConfig {
     recencyBoost: number
     /** Max turn pairs to inject */
     maxTurns: number
+    /**
+     * T08 soft cap (tokens) for the global identity layer. ADVISORY: the builder
+     * keeps global whole (it's small + byte-compat); this guides the synthesizer
+     * and documents the intended ~150-250 tok budget. Hosted tiers may raise it.
+     */
+    globalMaxTokens: number
+    /**
+     * T08 soft cap (tokens) for the scoped project-doc layer (~400-700). The
+     * builder trims the project doc to this (Open-threads-first) so it cannot eat
+     * the whole ceiling and starve Layer-1 turns. Hosted tiers may raise it.
+     */
+    projectMaxTokens: number
   }
 
   /** Global incognito mode */

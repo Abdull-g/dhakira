@@ -108,6 +108,8 @@ function mergeWithDefaults(raw: unknown): WalletConfig {
       minRelevanceScore: getNumber(injectionRaw.minRelevanceScore, d.injection.minRelevanceScore),
       recencyBoost: getNumber(injectionRaw.recencyBoost, d.injection.recencyBoost),
       maxTurns: getNumber(injectionRaw.maxTurns, d.injection.maxTurns),
+      globalMaxTokens: getNumber(injectionRaw.globalMaxTokens, d.injection.globalMaxTokens),
+      projectMaxTokens: getNumber(injectionRaw.projectMaxTokens, d.injection.projectMaxTokens),
     },
     incognito: getBoolean(raw.incognito, d.incognito),
   }
