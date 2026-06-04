@@ -41,8 +41,14 @@ function buildFrontmatter(conversation: CapturedConversation): string {
     `timestamp: ${conversation.timestamp.toISOString()}`,
     `tokenEstimate: ${conversation.tokenEstimate}`,
     `incognito: ${conversation.incognito}`,
-    '---',
   ]
+  // Additive + backward-compat (T08): only EMIT projectId when it resolved to a
+  // real scope, so a 'global' capture produces byte-identical frontmatter to
+  // pre-T08 (mirrors turns.ts:293 / buildMemoryContent's consolidated/forgottenAt).
+  if (conversation.projectId && conversation.projectId !== 'global') {
+    lines.push(`projectId: ${conversation.projectId}`)
+  }
+  lines.push('---')
   return lines.join('\n')
 }
 

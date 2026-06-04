@@ -50,6 +50,13 @@ export interface MemoryRecord {
   salienceTier: SalienceTier
   /** Source conversation ID */
   source: string
+  /**
+   * T07 context axis (T08): the project this memory belongs to, threaded from the
+   * source conversation's resolved projectId. 'global' = cross-project identity
+   * (the default). Drives projectId-scoped synthesis. Emitted to frontmatter only
+   * when non-global, so global memories stay byte-identical to pre-T08.
+   */
+  projectId: string
   /** When this memory was created */
   createdAt: Date
   /** When the fact became true */

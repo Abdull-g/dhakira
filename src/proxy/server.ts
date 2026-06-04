@@ -404,6 +404,10 @@ function buildCapturedConversation(
     timestamp: normalized.timestamp,
     tokenEstimate: estimateMessagesTokens(messages),
     incognito,
+    // This default-capture fallback has no resolved project context, so it
+    // degrades to the 'global' scope (additive discipline: never break a capture
+    // for project-stamping). The real capture path resolves projectId at the edge.
+    projectId: 'global',
   }
 }
 

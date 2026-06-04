@@ -320,6 +320,7 @@ export async function captureConversationOnce(
         timestamp: normalized.timestamp,
         tokenEstimate: estimateMessagesTokens(conversationMessages),
         incognito: config.incognito,
+        projectId,
       }
 
       await writeConversation(conversation, config.walletDir)
@@ -375,6 +376,7 @@ export async function captureConversationOnce(
     timestamp: normalized.timestamp,
     tokenEstimate: estimateMessagesTokens(messagesWithResponse),
     incognito: config.incognito,
+    projectId,
   }
 
   await writeConversation(conversation, config.walletDir)

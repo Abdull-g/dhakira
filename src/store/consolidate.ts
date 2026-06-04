@@ -784,6 +784,10 @@ async function buildConsolidatedMemory(
     salienceScore: salience.score,
     salienceTier: salience.tier,
     source: cluster.map((m) => m.id).join('+'),
+    // T08 deferred seam: project-scoped consolidation is future work (consolidation
+    // is dark by default). A merged cluster can span projects, so default to the
+    // 'global' scope rather than guess; revisit when consolidation ships live.
+    projectId: 'global',
     createdAt,
     validFrom: earliestValidFrom(cluster),
     invalidatedAt: null,

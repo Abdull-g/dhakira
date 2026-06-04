@@ -44,6 +44,7 @@ interface ConvFrontmatter {
   id: string
   incognito: boolean
   timestamp: string
+  projectId: string
 }
 
 const STATE_FILE = '.extraction-state.json'
@@ -75,6 +76,9 @@ function parseConvFrontmatter(content: string): ConvFrontmatter | null {
       id: String(parsed.id ?? ''),
       incognito: Boolean(parsed.incognito),
       timestamp: String(parsed.timestamp ?? new Date().toISOString()),
+      // Backward-compat: pre-T08 conversations have no projectId line → 'global'
+      // (mirrors loader.ts:41 / turns.ts default). Never break on old files.
+      projectId: parsed.projectId ? String(parsed.projectId) : 'global',
     }
   } catch {
     return null
@@ -99,6 +103,12 @@ export function buildMemoryContent(memory: MemoryRecord): string {
     `invalidatedAt: ${memory.invalidatedAt ? memory.invalidatedAt.toISOString() : 'null'}`,
     `expiresAt: ${memory.expiresAt ? memory.expiresAt.toISOString() : 'null'}`,
   ]
+  // Additive + backward-compat (T08): only EMIT projectId when it resolved to a
+  // real scope, so a 'global' memory produces byte-identical frontmatter to
+  // pre-T08 (same discipline as consolidated/forgottenAt below).
+  if (memory.projectId && memory.projectId !== 'global') {
+    lines.push(`projectId: ${memory.projectId}`)
+  }
   // Additive + backward-compat: only EMIT this line when true, so a normal
   // (non-consolidated) memory produces byte-identical frontmatter to pre-T05.
   if (memory.consolidated) lines.push('consolidated: true')
@@ -269,7 +279,12 @@ export async function softForgetMemoryFile(walletDir: string, memoryId: string):
   await writeFile(filePath, updated, 'utf8')
 }
 
-function factToMemory(fact: ExtractedFact, sourceId: string, convTimestamp: Date): MemoryRecord {
+function factToMemory(
+  fact: ExtractedFact,
+  sourceId: string,
+  convTimestamp: Date,
+  projectId: string,
+): MemoryRecord {
   // Salience rides on the fact as a ScoredFact through processUpdates. Defensive
   // default: if an unscored fact ever reaches storage, fall back to the
   // deterministic heuristic so we NEVER persist an undefined salience.
@@ -286,6 +301,7 @@ function factToMemory(fact: ExtractedFact, sourceId: string, convTimestamp: Date
     salienceScore: salience.score,
     salienceTier: salience.tier,
     source: sourceId,
+    projectId,
     createdAt,
     validFrom: convTimestamp,
     invalidatedAt: null,
@@ -298,6 +314,7 @@ async function applyActions(
   actions: UpdateAction[],
   sourceId: string,
   convTimestamp: Date,
+  projectId: string,
   stats: ExtractionStats,
 ): Promise<void> {
   const logger = createLogger('extraction')
@@ -305,12 +322,12 @@ async function applyActions(
   for (const action of actions) {
     try {
       if (action.action === 'ADD') {
-        const memory = factToMemory(action.fact, sourceId, convTimestamp)
+        const memory = factToMemory(action.fact, sourceId, convTimestamp, projectId)
         await writeMemoryFile(walletDir, memory)
         stats.memoriesCreated++
       } else if (action.action === 'UPDATE') {
         await invalidateMemoryFile(walletDir, action.targetId)
-        const memory = factToMemory(action.fact, sourceId, convTimestamp)
+        const memory = factToMemory(action.fact, sourceId, convTimestamp, projectId)
         await writeMemoryFile(walletDir, memory)
         stats.memoriesUpdated++
       } else if (action.action === 'INVALIDATE') {
@@ -408,7 +425,14 @@ async function processConversation(
         memoriesInvalidated: 0,
         memoriesNoop: 0,
       }
-      await applyActions(ctx.walletDir, updateResult.value, fm.id, convTimestamp, actionStats)
+      await applyActions(
+        ctx.walletDir,
+        updateResult.value,
+        fm.id,
+        convTimestamp,
+        fm.projectId,
+        actionStats,
+      )
       partialStats.memoriesCreated = actionStats.memoriesCreated
       partialStats.memoriesUpdated = actionStats.memoriesUpdated
       partialStats.memoriesInvalidated = actionStats.memoriesInvalidated
