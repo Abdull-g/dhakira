@@ -26,11 +26,7 @@
 // DECOMPOSITION (N calls instead of one); evolve-via-supersession (narrative
 // continuity); hosted bigger-model swap (a model change behind the harness).
 
-import {
-  fillTemplate,
-  GLOBAL_PROFILE_PROMPT,
-  PROJECT_DOC_PROMPT,
-} from '../extraction/prompts.js'
+import { fillTemplate, GLOBAL_PROFILE_PROMPT, PROJECT_DOC_PROMPT } from '../extraction/prompts.js'
 import type { ModelHarness } from '../harness/harness.js'
 import type { HarnessTask } from '../harness/types.js'
 import { createLogger } from '../utils/logger.js'
@@ -213,12 +209,15 @@ async function runLadder<T>(
   if (flat.length === 0) return null // flat-also-empty → omit
 
   synthesisFallbackCount += 1
-  logger.warn('synthesis fell back to flat (model whiffed — emitting raw memories, never fabrication)', {
-    task: taskName,
-    memoryCount: memories.length,
-    reason: result.ok ? 'empty-structured-output' : result.error.message,
-    fallbackCount: synthesisFallbackCount,
-  })
+  logger.warn(
+    'synthesis fell back to flat (model whiffed — emitting raw memories, never fabrication)',
+    {
+      task: taskName,
+      memoryCount: memories.length,
+      reason: result.ok ? 'empty-structured-output' : result.error.message,
+      fallbackCount: synthesisFallbackCount,
+    },
+  )
   return flat
 }
 

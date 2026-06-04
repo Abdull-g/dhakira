@@ -620,6 +620,28 @@ async function maybeConsolidate(
 }
 
 /**
+ * T08 scoped project-doc rebuild trigger. Runs after regenerateProfile (global).
+ * Fully non-fatal: a synthesis failure must NEVER abort extraction. The dynamic
+ * import keeps the synthesis chain (collect/synthesize/harness) off the hot path
+ * until there is actually something to rebuild.
+ */
+async function maybeRegenerateProjectDocs(
+  walletDir: string,
+  config: WalletConfig['extraction'],
+  touchedProjectIds: Set<string>,
+): Promise<void> {
+  const logger = createLogger('extraction')
+  try {
+    const { regenerateProjectDocs } = await import('../synthesis/regenerate.js')
+    await regenerateProjectDocs(walletDir, config, touchedProjectIds)
+  } catch (err) {
+    logger.warn('project-doc regeneration failed (non-fatal)', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/**
  * Run the full extraction pipeline:
  * 1. Find unprocessed conversations (tracked in .extraction-state.json)
  * 2. Skip conversations with < 3 messages or flagged incognito
@@ -683,16 +705,8 @@ export async function runExtraction(
     await regenerateProfile(walletDir, config)
 
     // T08: rebuild ONLY the touched (non-global) project docs through the CP3
-    // synthesis ladder. Scoped, freshness-by-rebuild. Non-fatal: a synthesis
-    // failure must never abort the extraction run.
-    try {
-      const { regenerateProjectDocs } = await import('../synthesis/regenerate.js')
-      await regenerateProjectDocs(walletDir, config, touchedProjectIds)
-    } catch (err) {
-      logger.warn('project-doc regeneration failed (non-fatal)', {
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
+    // synthesis ladder. Scoped, freshness-by-rebuild, fully non-fatal.
+    await maybeRegenerateProjectDocs(walletDir, config, touchedProjectIds)
   }
 
   // Save state — only successfully processed IDs are in processedIds

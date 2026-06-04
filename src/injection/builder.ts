@@ -148,6 +148,41 @@ function trimProjectDoc(doc: string, maxTokens: number): string {
 }
 
 /**
+ * Trim + frame the project section to min(soft cap, ceiling room after the
+ * must-keep chrome + global). Returns '' when nothing survives the budget.
+ */
+function fitProjectSection(
+  project: string,
+  projectHeader: string,
+  profileSection: string,
+  config: WalletConfig['injection'],
+): string {
+  const projectCap = config.projectMaxTokens ?? DEFAULT_PROJECT_MAX_TOKENS
+  const chrome = [HEADER, profileSection, projectHeader, TURNS_SECTION_HEADER, FOOTER]
+    .filter((s) => s.length > 0)
+    .join('\n\n')
+  const roomForProjectBody = config.maxTokens - estimateTokens(chrome)
+  const projectBudget = Math.min(projectCap, Math.max(0, roomForProjectBody))
+  const trimmed = trimProjectDoc(project, projectBudget)
+  return trimmed.length > 0 ? `${projectHeader}\n${trimmed}` : ''
+}
+
+/** Greedy highest-score-first turn selection within the remaining budget + maxTurns. */
+function selectTurnEntries(sorted: TurnSearchResult[], maxTurns: number, budget: number): string[] {
+  let remaining = budget
+  const included: string[] = []
+  for (const result of sorted) {
+    if (included.length >= maxTurns) break
+    const entry = formatTurnEntry(result)
+    const cost = estimateTokens((included.length > 0 ? '\n\n' : '') + entry)
+    if (cost > remaining) break
+    included.push(entry)
+    remaining -= cost
+  }
+  return included
+}
+
+/**
  * Build the injection block for the current request.
  *
  * @param globalProfile  the global identity body (## About You). Kept whole.
@@ -171,55 +206,39 @@ export function buildInjectionBlock(
 
   const sorted = [...searchResults].sort((a, b) => b.score - a.score)
 
-  let project = projectDoc?.trim() ?? ''
+  const project = projectDoc?.trim() ?? ''
   let hasProject = project.length > 0
 
   if (!hasProfile && !hasProject && sorted.length === 0) {
     return { text: '', tokenCount: 0, memoryCount: 0, hasProfile: false, hasProject: false }
   }
 
-  const projectCap = config.projectMaxTokens ?? DEFAULT_PROJECT_MAX_TOKENS
-
   // Tier 1: global identity — kept whole (highest priority, small by construction).
   const profileSection = hasProfile ? `${PROFILE_SECTION_HEADER}\n${trimmedProfile}` : ''
 
-  // Tier 2: project synthesis — trim its body to min(soft cap, ceiling room left
-  // after the must-keep chrome + global). Open threads drops first (see trimProjectDoc).
+  // Tier 2: project synthesis — trim to soft cap / ceiling room, Open-threads-first.
   const projectHeader = projectName
     ? `${PROJECT_SECTION_HEADER}: ${projectName}`
     : PROJECT_SECTION_HEADER
-  let projectSection = ''
-  if (hasProject) {
-    const chromeParts = [HEADER, profileSection, projectHeader, TURNS_SECTION_HEADER, FOOTER].filter(
-      (s) => s.length > 0,
-    )
-    const roomForProjectBody = config.maxTokens - estimateTokens(chromeParts.join('\n\n'))
-    const projectBudget = Math.min(projectCap, Math.max(0, roomForProjectBody))
-    project = trimProjectDoc(project, projectBudget)
-    hasProject = project.length > 0
-    if (hasProject) projectSection = `${projectHeader}\n${project}`
-  }
+  const projectSection = hasProject
+    ? fitProjectSection(project, projectHeader, profileSection, config)
+    : ''
+  hasProject = projectSection.length > 0
 
   // Skeleton = everything except the turn entries. Its cost is the baseline before
   // turns greedily fill the remainder.
-  const skeletonParts: string[] = [HEADER]
-  if (hasProfile) skeletonParts.push(profileSection)
-  if (hasProject) skeletonParts.push(projectSection)
-  skeletonParts.push(TURNS_SECTION_HEADER)
-  skeletonParts.push(FOOTER)
+  const skeletonParts = [
+    HEADER,
+    profileSection,
+    projectSection,
+    TURNS_SECTION_HEADER,
+    FOOTER,
+  ].filter((s) => s.length > 0)
   const skeletonCost = estimateTokens(skeletonParts.join('\n\n'))
 
   // Tier 3: Layer-1 turns — fill the remainder, highest-score first, up to maxTurns.
-  let turnsBudget = Math.max(0, config.maxTokens - skeletonCost)
-  const includedEntries: string[] = []
-  for (const result of sorted) {
-    if (includedEntries.length >= config.maxTurns) break
-    const entry = formatTurnEntry(result)
-    const cost = estimateTokens((includedEntries.length > 0 ? '\n\n' : '') + entry)
-    if (cost > turnsBudget) break
-    includedEntries.push(entry)
-    turnsBudget -= cost
-  }
+  const turnsBudget = Math.max(0, config.maxTokens - skeletonCost)
+  const includedEntries = selectTurnEntries(sorted, config.maxTurns, turnsBudget)
 
   // Assemble final text.
   const contentParts: string[] = [HEADER]
