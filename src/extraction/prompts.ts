@@ -110,6 +110,55 @@ Format:
 
 Respond with ONLY the formatted profile.`
 
+/**
+ * T08 global-identity synthesis — evolves PROFILE_PROMPT into a harness-constrained
+ * JSON shape (stable/active arrays) so the synthesis module gets structured fields
+ * for free and can degrade per-section. The PROSE PROFILE_PROMPT above stays live
+ * until the read path is rewired; this is the harness-backed successor.
+ */
+export const GLOBAL_PROFILE_PROMPT = `You are a profile writer. Based on these memories, produce a concise personal profile about the USER as JSON with two sections.
+
+MEMORIES:
+{memories}
+
+RULES:
+- Output ONLY valid JSON matching the schema below — no preamble, no markdown.
+- "stable": long-term identity, skills, preferences, relationships (things unlikely to change soon).
+- "active": current projects, goals, recent decisions, ongoing work (things that change over weeks/months).
+- Each entry is ONE short factual bullet string in third person ("Based in Riyadh, Saudi Arabia").
+- Fill a section ONLY from what the memories actually support. OMIT a section entirely (leave it out or empty) if the memories don't support it — NEVER invent, guess, or pad. An omitted section is correct; a fabricated one is a failure.
+- Be concise (~200 tokens total).
+
+Schema:
+{"stable": ["..."], "active": ["..."]}
+
+Respond with ONLY the JSON object.`
+
+/**
+ * T08 project-doc synthesis — the moat layer (reasoning OVER code). A single
+ * harness-constrained call produces all sections; each section is INDEPENDENTLY
+ * optional and omitted-not-faked when the memories don't support it.
+ */
+export const PROJECT_DOC_PROMPT = `You are a project memory synthesizer. Given memories about ONE software project, write a tight, structured project brief as JSON.
+
+MEMORIES:
+{memories}
+
+RULES:
+- Output ONLY valid JSON matching the schema below — no preamble, no markdown.
+- Fill a section ONLY if the memories actually support it. OMIT any section you cannot ground in the memories (leave it out or empty) — NEVER invent, guess, or pad. An omitted section is correct; a fabricated one is a failure.
+- Be DENSE and concrete: short bullet strings, not paragraphs. Preserve specific names, decisions, numbers, and reasons.
+- "whatThis": one line identifying what this project is.
+- "decisions": key decisions AND why they were made (the reasoning over the code — this is the most valuable section).
+- "conventions": team or style rules ("never default exports").
+- "gotchas": dead-ends, things tried and reverted, traps to avoid ("tried JWT refresh, broke on mobile, reverted").
+- "openThreads": current in-flight state and unresolved questions (lowest priority).
+
+Schema:
+{"whatThis": "string", "decisions": ["..."], "conventions": ["..."], "gotchas": ["..."], "openThreads": ["..."]}
+
+Respond with ONLY the JSON object.`
+
 export const SALIENCE_PROMPT = `You score how intrinsically important ONE fact about the user is for long-term memory.
 
 FACT: {fact_text}
