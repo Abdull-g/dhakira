@@ -35,6 +35,8 @@ import type { NormalizedMessage, NormalizedRequest } from './proxy/types.js'
 import { indexTurnPair, startReconciliation, stopReconciliation } from './retrieval/indexer.js'
 import { searchTurns } from './retrieval/search.js'
 import { createWalletStore } from './retrieval/store.js'
+import { readGitIdentity } from './store/git-identity.js'
+import { resolveProjectId, sniffCwd } from './store/project.js'
 import { generateId } from './utils/ids.js'
 import { createLogger } from './utils/logger.js'
 import { estimateMessagesTokens } from './utils/tokens.js'
@@ -255,12 +257,45 @@ async function writeAndIndexTurnPairs(
   }
 }
 
+/**
+ * L1 gather — the ONLY I/O on the project-resolution path, run at the capture edge.
+ * Assembles ProjectSignals (explicit header → sniffed cwd → LOCAL git read →
+ * fingerprint fallback) and hands them to the pure resolveProjectId. Local-disk
+ * only, never network. NEVER throws — any failure degrades to "global" so a capture
+ * is never broken by project-stamping (additive discipline).
+ */
+async function gatherProjectId(normalized: NormalizedRequest): Promise<string> {
+  try {
+    const explicitTag = normalized.rawHeaders['x-dhakira-project']
+    // Sniff cwd from the whole request text so the tool-agnostic seam catches both
+    // Claude Code's system-prompt line AND a Codex <cwd> tag in a user message.
+    const payloadText = [
+      normalized.systemPrompt ?? '',
+      ...normalized.messages.map((m) => m.content),
+    ].join('\n')
+    const cwd = sniffCwd(payloadText) ?? undefined
+    const fingerprint = computeContextFingerprint(normalized.systemPrompt)
+    const git = cwd === undefined ? {} : await readGitIdentity(cwd)
+    return resolveProjectId({
+      explicitTag,
+      gitRemote: git.gitRemote,
+      gitRoot: git.gitRoot,
+      cwd,
+      fingerprint,
+    })
+  } catch {
+    return 'global'
+  }
+}
+
 export async function captureConversationOnce(
   normalized: NormalizedRequest,
   responseBody: Buffer,
   config: WalletConfig,
   store: QMDStore,
 ): Promise<void> {
+  const projectId = await gatherProjectId(normalized)
+
   if (config.capture.pipelineVersion === 'v2') {
     const ingest = normalized.provider === 'anthropic' ? ingestAnthropicTrace : ingestOpenAITrace
     const traceResult = ingest({
@@ -296,6 +331,7 @@ export async function captureConversationOnce(
         conversation.id,
         conversation.timestamp,
         captureFingerprint,
+        projectId,
       )
       const gatedPairs = applyQualityGate(pairs)
       await writeAndIndexTurnPairs(
@@ -359,6 +395,7 @@ export async function captureConversationOnce(
       conversation.timestamp,
       config.walletDir,
       captureFingerprint,
+      projectId,
     ),
     config.walletDir,
     conversation.tool,
@@ -420,7 +457,9 @@ export async function main(): Promise<void> {
 
       const t0 = Date.now()
 
-      const contextFingerprint = computeContextFingerprint(normalized.systemPrompt)
+      // T07 context axis: resolve the request's projectId (same resolver as capture,
+      // query side) so the ranker boosts same-project turns across tools/machines.
+      const projectId = await gatherProjectId(normalized)
 
       const profileResult = await loadProfile(config.walletDir)
       const profile = profileResult.ok ? profileResult.value : ''
@@ -430,7 +469,8 @@ export async function main(): Promise<void> {
         limit: config.injection.maxTurns,
         minScore: config.injection.minRelevanceScore,
         recencyBoost: config.injection.recencyBoost,
-        contextFingerprint,
+        projectId,
+        scopeMode: 'boost',
       })
       const turns = searchResult.ok ? searchResult.value : []
 

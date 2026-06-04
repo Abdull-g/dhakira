@@ -30,6 +30,10 @@ export interface TurnPair {
   /** SHA-256 fingerprint of the tool's system prompt (first 12 hex chars).
    *  "default" when no system prompt was present. Used to boost same-project turns. */
   contextFingerprint: string
+  /** Stable, project-scoped identity resolved from git/cwd/header signals (Step 7).
+   *  "global" when no project signal was present. Promotes the dumb fingerprint
+   *  into a real, cross-tool/cross-machine scope. */
+  projectId: string
   /** True when the turn was explicitly recorded by the user. */
   userRecorded?: boolean
   /** Non-searchable capture metadata for tool-aware extraction. */
@@ -51,6 +55,7 @@ interface ExtractionContext {
   sessionId: string
   timestamp: Date
   contextFingerprint: string
+  projectId: string
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +74,7 @@ export function extractTurnPairs(
   sessionId: string,
   timestamp: Date,
   contextFingerprint = 'default',
+  projectId = 'global',
 ): TurnPair[] {
   const context: ExtractionContext = {
     pairs: [],
@@ -81,6 +87,7 @@ export function extractTurnPairs(
     sessionId,
     timestamp,
     contextFingerprint,
+    projectId,
   }
 
   for (const message of messages) {
@@ -180,6 +187,7 @@ function emitPair(context: ExtractionContext): void {
     sessionId: context.sessionId,
     turnIndex: context.turnIndex,
     contextFingerprint: context.contextFingerprint,
+    projectId: context.projectId,
     metadata: { toolsUsed: [...context.toolsUsed] },
   })
 
@@ -280,6 +288,9 @@ export function formatTurnPair(pair: TurnPair): string {
     `timestamp: ${pair.timestamp}`,
     `turnIndex: ${pair.turnIndex}`,
     `contextFingerprint: ${pair.contextFingerprint}`,
+    // Only emit projectId when it resolved to a real scope — turns that resolve to
+    // the "global" default stay byte-identical to the pre-T07 format (T06 discipline).
+    ...(pair.projectId === 'global' ? [] : [`projectId: ${pair.projectId}`]),
     ...(pair.userRecorded === undefined ? [] : [`userRecorded: ${pair.userRecorded}`]),
     '---',
   ].join('\n')
@@ -379,8 +390,16 @@ export async function storeTurnPairs(
   timestamp: Date,
   walletDir: string,
   contextFingerprint = 'default',
+  projectId = 'global',
 ): Promise<Array<Result<string>>> {
-  const pairs = extractTurnPairs(messages, tool, sessionId, timestamp, contextFingerprint)
+  const pairs = extractTurnPairs(
+    messages,
+    tool,
+    sessionId,
+    timestamp,
+    contextFingerprint,
+    projectId,
+  )
   return Promise.all(pairs.map((pair) => writeTurnPair(pair, walletDir)))
 }
 
@@ -397,7 +416,15 @@ export async function storeTurnPairsWithContent(
   timestamp: Date,
   walletDir: string,
   contextFingerprint = 'default',
+  projectId = 'global',
 ): Promise<Array<Result<StoredTurnPair>>> {
-  const pairs = extractTurnPairs(messages, tool, sessionId, timestamp, contextFingerprint)
+  const pairs = extractTurnPairs(
+    messages,
+    tool,
+    sessionId,
+    timestamp,
+    contextFingerprint,
+    projectId,
+  )
   return Promise.all(pairs.map((pair) => writeTurnPairWithContent(pair, walletDir)))
 }

@@ -46,6 +46,7 @@ function makeTurnPair(overrides: Partial<TurnPair> = {}): TurnPair {
     sessionId: 'user-records',
     turnIndex: 0,
     contextFingerprint: 'default',
+    projectId: 'global',
     ...overrides,
   }
 }

@@ -37,6 +37,8 @@ export function parseTurnPairFromBody(body: string): TurnPair | null {
     userContent: userMatch?.[1]?.trim() ?? '',
     assistantContent: assistantMatch?.[1]?.trim() ?? '',
     contextFingerprint: get('contextFingerprint') || 'default',
+    // Backward-compat: pre-T07 turns have no projectId line → "global" (never break).
+    projectId: get('projectId') || 'global',
     ...(userRecorded === undefined ? {} : { userRecorded }),
   }
 }

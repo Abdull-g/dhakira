@@ -50,6 +50,7 @@ export async function recordTurn(
     sessionId: SESSION_ID,
     turnIndex: await nextUserRecordTurnIndex(walletDir),
     contextFingerprint: 'default',
+    projectId: 'global',
     userRecorded: true,
   }
 

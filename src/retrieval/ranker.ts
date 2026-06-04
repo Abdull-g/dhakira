@@ -2,7 +2,7 @@
 import { createLogger } from '../utils/logger.js'
 import type { RawCandidate } from './backend.js'
 import { parseTurnPairFromBody } from './loader.js'
-import type { TurnSearchOptions, TurnSearchResult } from './types.js'
+import type { ScopeMode, TurnSearchOptions, TurnSearchResult } from './types.js'
 
 /**
  * Recency decay factor: 1.0 for today, linearly decreasing to 0.0 at 90 days ago.
@@ -50,12 +50,33 @@ function deduplicateBySession(results: TurnSearchResult[]): TurnSearchResult[] {
 }
 
 /**
+ * Project-scope multiplier for the context ranking axis (T07).
+ *
+ * 'boost' (DEFAULT, shipping) gives a soft 1.5x to turns sharing the request's
+ * projectId — stable across tools/machines (the moat), unlike the demoted
+ * system-prompt fingerprint it replaces. 'only' (hard project isolation) is a
+ * RESERVED seam: it is threaded end-to-end so it's not a future refactor, but no
+ * behavior ships — it currently behaves identically to 'boost' and no caller sets
+ * it (observe-first, same gate as consolidation's dark flag / T06's purge).
+ */
+function projectScopeMultiplier(scopeMode: ScopeMode, matched: boolean): number {
+  if (!matched) return 1.0
+  switch (scopeMode) {
+    case 'boost':
+    case 'only':
+      return 1.5
+  }
+}
+
+/**
  * Apply OUR ranking to raw backend candidates.
  *
  * Parses each body, applies recency boosting so recent relevant turns score higher:
  *   finalScore = relevanceScore × (1 + recencyBoost × recencyFactor) × contextMultiplier
  * where recencyFactor decays linearly from 1.0 (today) to 0.0 (≥90 days ago) and
- * contextMultiplier is 1.5x for turns sharing the request's context fingerprint.
+ * contextMultiplier is 1.5x for turns sharing the request's projectId (the T07
+ * context axis — fingerprint is no longer compared directly; it only feeds the
+ * upstream resolver). "global" never boosts.
  *
  * Then sorts by score descending, collapses same-session near-duplicates (>90% word
  * overlap, keeping the higher-scored entry), filters below `minScore`, and slices to `limit`.
@@ -65,7 +86,7 @@ export function rankCandidates(
   options: TurnSearchOptions,
 ): TurnSearchResult[] {
   const logger = createLogger('retrieval')
-  const { limit = 8, minScore = 0.3, recencyBoost = 0.3, contextFingerprint } = options
+  const { limit = 8, minScore = 0.3, recencyBoost = 0.3, projectId, scopeMode = 'boost' } = options
 
   // Parse turn pairs, apply recency boost, collect valid results.
   const scored: TurnSearchResult[] = []
@@ -76,12 +97,9 @@ export function rankCandidates(
       continue
     }
     const recencyFactor = computeRecencyFactor(turnPair.timestamp)
-    const contextMultiplier =
-      contextFingerprint &&
-      contextFingerprint !== 'default' &&
-      turnPair.contextFingerprint === contextFingerprint
-        ? 1.5
-        : 1.0
+    const projectMatch =
+      projectId !== undefined && projectId !== 'global' && turnPair.projectId === projectId
+    const contextMultiplier = projectScopeMultiplier(scopeMode, projectMatch)
     const finalScore = raw.score * (1 + recencyBoost * recencyFactor) * contextMultiplier
     scored.push({ turnPair, score: finalScore, source: raw.file })
   }

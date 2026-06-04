@@ -25,6 +25,7 @@ function makePair(overrides: Partial<TurnPair> = {}): TurnPair {
     sessionId: 'conv_quality',
     turnIndex: 0,
     contextFingerprint: 'default',
+    projectId: 'global',
     ...overrides,
   }
 }

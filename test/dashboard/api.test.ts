@@ -91,6 +91,7 @@ describe('dashboard API', () => {
         sessionId: 'user-records',
         turnIndex: 0,
         contextFingerprint: 'default',
+        projectId: 'global',
         userRecorded: true,
       },
     })
