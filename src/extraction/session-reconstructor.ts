@@ -213,6 +213,18 @@ export function cleanSessionContent(rawContent: string): string {
       // Get the body after the heading
       const body = clean.replace(/^## (?:User|Assistant)\n/, '').trim()
 
+      // Drop Claude Code autocomplete "suggestion mode" prompts. These are
+      // tool-generated completions (not real user intent) that the tool injects
+      // as User turns, e.g. "[SUGGESTION MODE: ...]". Extracting facts from them
+      // poisons memory with content the user never actually said. Provider-
+      // specific marker, but the harm (fake user facts) is delivery-agnostic.
+      if (
+        section.startsWith('## User') &&
+        body.replace(/^[\s>*_-]+/, '').startsWith('[SUGGESTION')
+      ) {
+        continue
+      }
+
       // Skip empty sections (tool call artifacts, empty user messages)
       if (body.length > 0) {
         kept.push(clean.trim())
