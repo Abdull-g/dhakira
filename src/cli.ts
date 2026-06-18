@@ -5,9 +5,9 @@ import { spawn } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { createInterface } from 'node:readline'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // ---------------------------------------------------------------------------
 // ANSI helpers
@@ -368,6 +368,137 @@ function generateSystemdService(execPath: string, scriptPath: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Hook wiring — Claude Code adapter (T09 CP3)
+//
+// `dhakira connect claude-code` merges a UserPromptSubmit + Stop hook into the
+// user's ~/.claude/settings.json, pointing both at the bundled dhakira-hook.mjs.
+// Idempotent (a marker prevents duplicate entries) and reversible (`disconnect`).
+// Codex/Cursor wiring is PARKED for T10 (see src/hooks/parked-connectors.ts) — this
+// ticket ships Claude FIRST and ALONE.
+// ---------------------------------------------------------------------------
+
+/** Marker substring identifying Dhakira's hook entries, for idempotent merge + clean removal. */
+const DHAKIRA_HOOK_MARKER = 'dhakira-hook.mjs'
+
+/** Absolute path to the bundled hook script (works for global install and `tsx src/cli.ts` dev). */
+function resolveHookScriptPath(): string {
+  const here = dirname(fileURLToPath(import.meta.url))
+  if (here.includes(`${sep}dist`) || here.endsWith('dist')) {
+    return join(here, 'hooks', 'dhakira-hook.mjs')
+  }
+  return join(here, '..', 'dist', 'hooks', 'dhakira-hook.mjs')
+}
+
+/** The shell command Claude Code runs for an event. `2>/dev/null` keeps a hook crash silent. */
+function claudeHookCommand(hookPath: string, event: 'UserPromptSubmit' | 'Stop'): string {
+  return `node "${hookPath}" ${event} 2>/dev/null`
+}
+
+type ClaudeHookBlock = { matcher: string; hooks: Array<{ type: string; command: string }> }
+
+async function mergeClaudeHooks(hookPath: string): Promise<void> {
+  const settingsPath = join(homedir(), '.claude', 'settings.json')
+  await mkdir(dirname(settingsPath), { recursive: true })
+
+  let root: Record<string, unknown> = {}
+  try {
+    root = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>
+  } catch {
+    // No settings file yet — start fresh.
+  }
+  const hooks = (root.hooks as Record<string, ClaudeHookBlock[]>) ?? {}
+
+  const mergeEvent = (event: 'UserPromptSubmit' | 'Stop'): void => {
+    const blocks = hooks[event] ?? []
+    const already = blocks.some((b) =>
+      b.hooks?.some(
+        (h) => typeof h.command === 'string' && h.command.includes(DHAKIRA_HOOK_MARKER),
+      ),
+    )
+    if (already) return
+    blocks.push({
+      matcher: '',
+      hooks: [{ type: 'command', command: claudeHookCommand(hookPath, event) }],
+    })
+    hooks[event] = blocks
+  }
+
+  mergeEvent('UserPromptSubmit')
+  mergeEvent('Stop')
+  root.hooks = hooks
+  await writeFile(settingsPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8')
+}
+
+async function removeClaudeHooks(): Promise<void> {
+  const settingsPath = join(homedir(), '.claude', 'settings.json')
+  let root: Record<string, unknown>
+  try {
+    root = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>
+  } catch {
+    return
+  }
+  const hooks = root.hooks as Record<string, ClaudeHookBlock[]> | undefined
+  if (!hooks || typeof hooks !== 'object') return
+
+  for (const key of Object.keys(hooks)) {
+    const blocks = hooks[key]
+    if (!Array.isArray(blocks)) continue
+    hooks[key] = blocks
+      .map((b) => ({
+        ...b,
+        hooks: (b.hooks ?? []).filter(
+          (h) => typeof h.command !== 'string' || !h.command.includes(DHAKIRA_HOOK_MARKER),
+        ),
+      }))
+      .filter((b) => (b.hooks?.length ?? 0) > 0)
+  }
+  root.hooks = hooks
+  await writeFile(settingsPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8')
+}
+
+async function commandConnect(tool: string): Promise<void> {
+  const t = tool.toLowerCase().trim()
+
+  if (t === 'codex' || t === 'cursor') {
+    console.log(`\n  ${c.yellow('!')}  ${tool} wiring is parked for a later ticket (Claude first).`)
+    console.log(`  Supported now: ${c.cyan('claude-code')}\n`)
+    return
+  }
+  if (t !== 'claude-code' && t !== 'claude') {
+    console.error(`\n  ${c.red(`Unknown tool: ${tool || '(none)'}`)}`)
+    console.log(`  Usage: ${c.cyan('dhakira connect claude-code')}\n`)
+    process.exit(1)
+  }
+
+  const hookPath = resolveHookScriptPath()
+  try {
+    await stat(hookPath)
+  } catch {
+    console.log(`\n  ${c.red('✗')} Hook script not found at ${c.dim(hookPath)}`)
+    console.log(`  Run ${c.cyan('npm run build')} first, then retry.\n`)
+    process.exit(1)
+  }
+
+  await mergeClaudeHooks(hookPath)
+  console.log(`\n  ${c.green('✓')} Claude Code connected ${c.dim('(~/.claude/settings.json)')}`)
+  console.log(
+    `  ${c.dim('Recall injects on each prompt; turns are captured when Claude finishes.')}`,
+  )
+  console.log(`  ${c.dim('Make sure Dhakira is running:')} ${c.cyan('dhakira start')}\n`)
+}
+
+async function commandDisconnect(tool: string): Promise<void> {
+  const t = tool.toLowerCase().trim()
+  if (t !== 'claude-code' && t !== 'claude') {
+    console.error(`\n  ${c.red(`Unknown tool: ${tool || '(none)'}`)}`)
+    console.log(`  Usage: ${c.cyan('dhakira disconnect claude-code')}\n`)
+    process.exit(1)
+  }
+  await removeClaudeHooks()
+  console.log(`\n  ${c.green('✓')} Removed Dhakira hooks from ~/.claude/settings.json\n`)
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
@@ -404,6 +535,8 @@ function printHelp(): void {
     ${c.cyan('extract')}    Regenerate your profile from captured conversations
     ${c.cyan('consolidate')} Distill redundant memories into denser ones
     ${c.cyan('forget')}     Soft-forget expired + aged-superseded memories
+    ${c.cyan('connect')}    Wire a tool's hooks into Dhakira ("dhakira connect claude-code")
+    ${c.cyan('disconnect')} Remove Dhakira's hooks from a tool ("dhakira disconnect claude-code")
     ${c.cyan('reset')}      Delete your wallet and start fresh
     ${c.cyan('help')}       Show this help message
 
@@ -1049,6 +1182,12 @@ async function run(): Promise<void> {
       break
     case 'reset':
       await commandReset()
+      break
+    case 'connect':
+      await commandConnect(args[0] ?? '')
+      break
+    case 'disconnect':
+      await commandDisconnect(args[0] ?? '')
       break
     case 'extract':
       await commandExtract()

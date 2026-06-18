@@ -10,8 +10,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { recordTurn } from '../capture/record.js'
 import type { WalletConfig } from '../config/schema.js'
 import { runExtraction } from '../extraction/runner.js'
-import { ingestTrace } from '../ingest.js'
+import { ingestTrace, resolveIngestProjectId } from '../ingest.js'
 import type { NormalizedMessage } from '../proxy/types.js'
+import { recallOnce } from '../recall.js'
 import { searchTurns } from '../retrieval/search.js'
 import { createLogger } from '../utils/logger.js'
 
@@ -382,6 +383,67 @@ async function handleIngest(
   sendJson(res, 200, result)
 }
 
+/**
+ * POST /api/recall — the generic inject verb. Wraps recallOnce (CP1) and returns
+ * the composed injection text for an adapter to deliver however it likes (Claude
+ * Code hook → additionalContext, etc). Localhost-only (the dashboard server binds
+ * 127.0.0.1). Fail-safe on malformed bodies (400, never throws).
+ *
+ * projectId resolution is the SAME ladder as /api/ingest (resolveIngestProjectId:
+ * explicit id → cwd sniff (local git read, never network) → 'global'). An adapter
+ * sends the SAME { projectId?, cwd? } signal to both verbs, so what it captures and
+ * what it recalls scope to one project. The resolved id is passed to recallOnce as
+ * an explicit projectId, so recall never needs the proxy's request-sniff path.
+ */
+async function handleRecall(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ApiDeps,
+): Promise<void> {
+  let bodyRaw: string
+  try {
+    bodyRaw = await readBody(req)
+  } catch {
+    sendJson(res, 400, { text: null, turnCount: 0, projectId: 'global', reason: 'unreadable_body' })
+    return
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(bodyRaw)
+  } catch {
+    sendJson(res, 400, { text: null, turnCount: 0, projectId: 'global', reason: 'invalid_json' })
+    return
+  }
+
+  const body = (typeof parsed === 'object' && parsed !== null ? parsed : {}) as Record<
+    string,
+    unknown
+  >
+  const query = typeof body.query === 'string' ? body.query.trim() : ''
+  if (query.length === 0) {
+    sendJson(res, 400, {
+      text: null,
+      turnCount: 0,
+      projectId: 'global',
+      reason: 'invalid_body: expected query',
+    })
+    return
+  }
+
+  const projectId = await resolveIngestProjectId({
+    projectId: typeof body.projectId === 'string' ? body.projectId : undefined,
+    cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
+  })
+
+  const result = await recallOnce(deps, { query, projectId })
+  sendJson(res, 200, {
+    text: result.text,
+    turnCount: result.turnCount,
+    projectId: result.projectId,
+  })
+}
+
 export interface ApiDeps {
   config: WalletConfig
   store: QMDStore
@@ -402,6 +464,7 @@ function buildRoutes(deps: ApiDeps): Map<string, RouteHandler> {
   routes.set('GET /api/search', (req, res) => handleSearch(req, res, deps))
   routes.set('POST /api/extract', (_, res) => handlePostExtract(res, deps))
   routes.set('POST /api/ingest', (req, res) => handleIngest(req, res, deps))
+  routes.set('POST /api/recall', (req, res) => handleRecall(req, res, deps))
 
   return routes
 }
