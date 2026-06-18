@@ -10,6 +10,8 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { recordTurn } from '../capture/record.js'
 import type { WalletConfig } from '../config/schema.js'
 import { runExtraction } from '../extraction/runner.js'
+import { ingestTrace } from '../ingest.js'
+import type { NormalizedMessage } from '../proxy/types.js'
 import { searchTurns } from '../retrieval/search.js'
 import { createLogger } from '../utils/logger.js'
 
@@ -299,6 +301,87 @@ async function handleToggleIncognito(
   }
 }
 
+/**
+ * Defensively coerce an incoming `messages` value into NormalizedMessage[].
+ * Returns null only when the value is not an array at all (a hard malformed-body
+ * case → 400). Individual malformed entries are skipped, not fatal.
+ */
+function normalizeIngestMessages(value: unknown): NormalizedMessage[] | null {
+  if (!Array.isArray(value)) return null
+  const out: NormalizedMessage[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue
+    const { role, content } = item as Record<string, unknown>
+    if (
+      (role === 'user' || role === 'assistant' || role === 'system') &&
+      typeof content === 'string'
+    ) {
+      out.push({ role, content })
+    }
+  }
+  return out
+}
+
+/**
+ * POST /api/ingest — the generic capture verb. Runs the full hygiene chain via
+ * ingestTrace (classify+sanitize+gate ALWAYS run). Honors incognito at the daemon
+ * edge (mirrors how the proxy server gates capture). Localhost-only (the dashboard
+ * server binds 127.0.0.1). Fail-safe on malformed bodies (400, never throws).
+ */
+async function handleIngest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  deps: ApiDeps,
+): Promise<void> {
+  let bodyRaw: string
+  try {
+    bodyRaw = await readBody(req)
+  } catch {
+    sendJson(res, 400, { ok: false, captured: false, turnPairs: 0, reason: 'unreadable_body' })
+    return
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(bodyRaw)
+  } catch {
+    sendJson(res, 400, { ok: false, captured: false, turnPairs: 0, reason: 'invalid_json' })
+    return
+  }
+
+  const body = (typeof parsed === 'object' && parsed !== null ? parsed : {}) as Record<
+    string,
+    unknown
+  >
+  const tool = typeof body.tool === 'string' ? body.tool : ''
+  const messages = normalizeIngestMessages(body.messages)
+  if (messages === null || tool.length === 0) {
+    sendJson(res, 400, {
+      ok: false,
+      captured: false,
+      turnPairs: 0,
+      reason: 'invalid_body: expected messages[] and tool',
+    })
+    return
+  }
+
+  // Honor incognito: skip capture entirely (no write), same intent as the proxy
+  // server not invoking captureConversation when incognito is on.
+  if (deps.config.incognito) {
+    sendJson(res, 200, { ok: true, captured: false, turnPairs: 0, reason: 'incognito' })
+    return
+  }
+
+  const result = await ingestTrace(deps, {
+    messages,
+    tool,
+    model: typeof body.model === 'string' ? body.model : undefined,
+    projectId: typeof body.projectId === 'string' ? body.projectId : undefined,
+    cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
+  })
+  sendJson(res, 200, result)
+}
+
 export interface ApiDeps {
   config: WalletConfig
   store: QMDStore
@@ -318,6 +401,7 @@ function buildRoutes(deps: ApiDeps): Map<string, RouteHandler> {
   routes.set('POST /api/record', (req, res) => handlePostRecord(req, res, deps))
   routes.set('GET /api/search', (req, res) => handleSearch(req, res, deps))
   routes.set('POST /api/extract', (_, res) => handlePostExtract(res, deps))
+  routes.set('POST /api/ingest', (req, res) => handleIngest(req, res, deps))
 
   return routes
 }
