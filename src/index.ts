@@ -25,19 +25,16 @@ import { loadConfig } from './config/loader.js'
 import type { WalletConfig } from './config/schema.js'
 import { createDashboardServer } from './dashboard/server.js'
 import { maybeTriggerExtraction } from './extraction/trigger.js'
-import { buildInjectionBlock } from './injection/builder.js'
 import { injectIntoSystemPrompt } from './injection/injector.js'
-import { loadProfile } from './injection/profile.js'
 import { computeContextFingerprint } from './proxy/fingerprint.js'
 import type { ProxyDeps } from './proxy/server.js'
 import { createProxyServer } from './proxy/server.js'
 import type { NormalizedMessage, NormalizedRequest } from './proxy/types.js'
+import { recallOnce } from './recall.js'
 import { indexTurnPair, startReconciliation, stopReconciliation } from './retrieval/indexer.js'
-import { searchTurns } from './retrieval/search.js'
 import { createWalletStore } from './retrieval/store.js'
 import { readGitIdentity } from './store/git-identity.js'
 import { resolveProjectId, sniffCwd } from './store/project.js'
-import { loadProjectDoc, projectDisplayName } from './synthesis/project-doc.js'
 import { generateId } from './utils/ids.js'
 import { createLogger } from './utils/logger.js'
 import { estimateMessagesTokens } from './utils/tokens.js'
@@ -458,41 +455,18 @@ export async function main(): Promise<void> {
 
       if (!lastUserMessage) return null
 
-      const t0 = Date.now()
-
-      // T07 context axis: resolve the request's projectId (same resolver as capture,
-      // query side) so the ranker boosts same-project turns across tools/machines.
-      const projectId = await gatherProjectId(normalized)
-
-      const profileResult = await loadProfile(config.walletDir)
-      const profile = profileResult.ok ? profileResult.value : ''
-
-      // T08: load the scoped project doc for this request's projectId (reusing the
-      // id already resolved above). null when global-scoped or no doc exists →
-      // composition behaves exactly like pre-T08 (global + turns).
-      const projectDoc = await loadProjectDoc(config.walletDir, projectId)
-
-      const searchResult = await searchTurns(store, {
-        query: lastUserMessage,
-        limit: config.injection.maxTurns,
-        minScore: config.injection.minRelevanceScore,
-        recencyBoost: config.injection.recencyBoost,
-        projectId,
-        scopeMode: 'boost',
-      })
-      const turns = searchResult.ok ? searchResult.value : []
-
-      const injectionBlock = buildInjectionBlock(
-        profile,
-        projectDoc,
-        turns,
-        config.injection,
-        projectDisplayName(projectId),
+      // Pure core: retrieval + composition, no stdout. The proxy passes `normalized`
+      // so the same gatherProjectId sniff runs as before (T07 query-side axis).
+      const result = await recallOnce(
+        { store, config, resolveProjectId: gatherProjectId },
+        { query: lastUserMessage, normalized },
       )
-      if (!injectionBlock.text) return null
+      if (result.text === null) return null
 
-      const elapsedS = ((Date.now() - t0) / 1000).toFixed(2)
-      const count = turns.length
+      // Personality/verbose stdout lives HERE, in the proxy adapter — never in the
+      // reusable core. Driven entirely by the structured RecallResult.
+      const elapsedS = (result.elapsedMs / 1000).toFixed(2)
+      const count = result.turnCount
       if (count > 0) {
         // "First memory injection" personality line — fires once per wallet lifetime.
         if (firstInjectionPending) {
@@ -503,7 +477,7 @@ export async function main(): Promise<void> {
           emit(`${fmtTime()} ${count} turn${count === 1 ? '' : 's'} injected (${elapsedS}s)`)
         }
         if (verbose) {
-          for (const r of turns) {
+          for (const r of result.turns) {
             const snippet = r.turnPair.userContent.slice(0, 60).replace(/\n/g, ' ')
             const date = new Date(r.turnPair.timestamp)
             const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -512,7 +486,7 @@ export async function main(): Promise<void> {
         }
       }
 
-      return injectIntoSystemPrompt(normalized.systemPrompt, injectionBlock)
+      return injectIntoSystemPrompt(normalized.systemPrompt, { text: result.text })
     },
 
     captureConversation: createCaptureConversation(config, store),

@@ -4,7 +4,9 @@ import type { InjectionBlock } from './types.js'
 
 export function injectIntoSystemPrompt(
   originalPrompt: string | null,
-  injectionBlock: InjectionBlock,
+  // Only `.text` is read, so accept anything that carries it (a full
+  // InjectionBlock from the builder, or a bare { text } from recallOnce).
+  injectionBlock: Pick<InjectionBlock, 'text'>,
 ): string {
   if (!injectionBlock.text) {
     return originalPrompt ?? ''
