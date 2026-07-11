@@ -134,9 +134,16 @@ export class LocalLLMExtractor implements Extractor {
           )
         }
 
+        // node-llama-cpp guidance: when generation is grammar-constrained, cap at the
+        // context size rather than a small fixed limit. The grammar already bounds the
+        // OUTPUT SHAPE, so a low cap only risks truncating a valid JSON object mid-emit
+        // (→ parse fail → avoidable harness retry / dropped facts). The fixed
+        // DEFAULT_MAX_TOKENS floor stays for UNCONSTRAINED generation, where a cap is the
+        // only thing stopping a runaway ramble. An explicit caller maxTokens always wins.
+        const grammarMaxTokens = opts.maxTokens ?? context.contextSize
         const text = await session.prompt(prompt, {
           grammar,
-          maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+          maxTokens: grammar ? grammarMaxTokens : (opts.maxTokens ?? DEFAULT_MAX_TOKENS),
           temperature: opts.temperature ?? 0,
         })
 
