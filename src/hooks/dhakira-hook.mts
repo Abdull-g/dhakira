@@ -1,15 +1,14 @@
 #!/usr/bin/env node
-// Dhakira — Claude Code hook entrypoint (the script `dhakira connect claude-code`
-// points Claude Code at). Deliberately trivial: read the event name from argv, the
-// event JSON from stdin, hand both to the adapter, print whatever it returns, and
-// ALWAYS exit 0. All real logic + the fail-open guarantees live in (and are tested
-// in) claude-code-adapter.ts. This shim only does stdin/stdout/exit plumbing.
+// Dhakira — shared Claude Code/Codex hook entrypoint. Both tools point at this
+// marker-stable script; hook-dispatch selects the stateless adapter from the
+// verified payload contract. This shim only does stdin/stdout/exit plumbing and
+// ALWAYS exits 0.
 //
 // Configured command: `node "<dist>/hooks/dhakira-hook.mjs" <EventName>`.
 
 import { readFileSync } from 'node:fs'
 
-import { handleEvent } from './claude-code-adapter.js'
+import { dispatchHookEvent } from './hook-dispatch.js'
 
 async function main(): Promise<void> {
   const event = process.argv[2] ?? ''
@@ -23,7 +22,7 @@ async function main(): Promise<void> {
 
   let out = ''
   try {
-    out = await handleEvent(event, payload)
+    out = await dispatchHookEvent(event, payload)
   } catch {
     out = ''
   }

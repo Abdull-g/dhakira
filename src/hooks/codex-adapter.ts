@@ -78,7 +78,7 @@ function entryFromRecord(record: Record<string, unknown>): CodexTranscriptEntry 
 /**
  * Extract the just-finished Codex turn.
  *
- * Verified against a local Codex 0.133 rollout on 2026-07-11:
+ * Verified against the installed Codex 0.137.0 rollout format on 2026-07-11:
  * - explicit prompts: { type:"event_msg", payload:{ type:"user_message", message } }
  * - wire messages:    { type:"response_item", payload:{ type:"message", role, content } }
  *
