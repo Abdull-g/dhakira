@@ -16,83 +16,15 @@
 // HOOK CONTRACT — verified against live Claude Code docs (docs.claude.com hooks
 // reference) + a real transcript on disk, 2026-06-19. See the field map in the report.
 
-import { readFileSync } from 'node:fs'
+import { createHookAdapter, type LastTurn, stripInjected } from './shared-adapter.js'
 
-/** The daemon binds 127.0.0.1 (dashboard server). Overridable for tests / non-default ports. */
-const DEFAULT_BASE_URL = 'http://127.0.0.1:4101'
-/** Hard fail-open ceiling for any single daemon call. Well under CC's 30s prompt-hook budget. */
-const DEFAULT_TIMEOUT_MS = 1500
-/** Source tool stamped on capture + sent as the project-scope signal alongside cwd. */
-const TOOL = 'claude-code'
-
-/** A user/assistant pair the adapter sends to /api/ingest. Local type — no engine import. */
-export interface HookMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-export interface AdapterOptions {
-  /** Daemon base URL. Defaults to DHAKIRA_DASHBOARD_URL env, then 127.0.0.1:4101. */
-  baseUrl?: string
-  /** Hard per-call timeout in ms. Defaults to 1500. */
-  timeoutMs?: number
-  /** Injectable fetch (tests). Defaults to global fetch. */
-  fetchImpl?: typeof fetch
-  /** Injectable transcript reader (tests). Defaults to a safe readFileSync. */
-  readTranscript?: (path: string) => string
-}
-
-/** The single turn extracted from a transcript at Stop time. */
-export interface LastTurn {
-  user: string
-  assistant: string
-}
-
-interface ResolvedOptions {
-  baseUrl: string
-  timeoutMs: number
-  fetchImpl: typeof fetch
-  readTranscript: (path: string) => string
-}
-
-function defaultReadTranscript(path: string): string {
-  try {
-    return readFileSync(path, 'utf8')
-  } catch {
-    return ''
-  }
-}
-
-function resolveOptions(opts: AdapterOptions): ResolvedOptions {
-  return {
-    baseUrl: opts.baseUrl ?? process.env.DHAKIRA_DASHBOARD_URL ?? DEFAULT_BASE_URL,
-    timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    fetchImpl: opts.fetchImpl ?? fetch,
-    readTranscript: opts.readTranscript ?? defaultReadTranscript,
-  }
-}
-
-/** First string value among `keys` on a loosely-typed payload, else ''. */
-function pickString(payload: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = payload[key]
-    if (typeof value === 'string') return value
-  }
-  return ''
-}
-
-const INJECTED_TAG = /<dhakira_context>[\s\S]*?<\/dhakira_context>/gi
-const SYSTEM_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/gi
-
-/**
- * Strip context Dhakira itself injected (recall is wrapped in <dhakira_context>, and
- * Claude Code wraps additionalContext in a <system-reminder>) so we never re-ingest
- * our own injection as if the user said it. The daemon's sanitizer also strips these,
- * so this is belt-and-suspenders against a feedback loop.
- */
-function stripInjected(text: string): string {
-  return text.replace(SYSTEM_REMINDER, '').replace(INJECTED_TAG, '').trim()
-}
+export type {
+  AdapterOptions,
+  HookMessage,
+  LastTurn,
+  StopOutcome,
+  UserPromptSubmitOutput,
+} from './shared-adapter.js'
 
 /**
  * Extract plain text from a transcript record's `content`, which is either a string
@@ -168,151 +100,11 @@ export function extractLastTurn(raw: string, lastAssistantMessage = ''): LastTur
   return { user: lastUser, assistant }
 }
 
-/** POST JSON with a hard timeout. Returns parsed JSON on a 2xx, else null. Never hangs. */
-async function postJson(
-  url: string,
-  payload: unknown,
-  o: ResolvedOptions,
-): Promise<unknown | null> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), o.timeoutMs)
-  try {
-    const res = await o.fetchImpl(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-    if (!res.ok) return null
-    return await res.json()
-  } finally {
-    clearTimeout(timer)
-  }
-}
+const adapter = createHookAdapter({ tool: 'claude-code', extractLastTurn })
 
-/** The JSON object Claude Code reads on stdout to inject per-prompt context. */
-export interface UserPromptSubmitOutput {
-  hookSpecificOutput: {
-    hookEventName: 'UserPromptSubmit'
-    additionalContext: string
-  }
-}
-
-/**
- * UserPromptSubmit → recall. Returns the output object to print, or null to inject
- * nothing (no memory, empty query, or ANY daemon failure → prompt proceeds normally).
- */
-export async function runUserPromptSubmit(
-  payload: Record<string, unknown>,
-  opts: AdapterOptions = {},
-): Promise<UserPromptSubmitOutput | null> {
-  const o = resolveOptions(opts)
-  const query = pickString(payload, ['prompt', 'message', 'text']).trim()
-  if (query.length === 0) return null
-
-  const cwd = pickString(payload, ['cwd'])
-  const projectId = pickString(payload, ['projectId', 'project_id'])
-
-  let text = ''
-  try {
-    const body = await postJson(
-      `${o.baseUrl}/api/recall`,
-      {
-        query,
-        tool: TOOL,
-        ...(cwd.length > 0 ? { cwd } : {}),
-        ...(projectId.length > 0 ? { projectId } : {}),
-      },
-      o,
-    )
-    if (typeof body === 'object' && body !== null) {
-      const t = (body as Record<string, unknown>).text
-      if (typeof t === 'string') text = t
-    }
-  } catch {
-    // FAIL-OPEN: daemon down / slow / aborted / unreachable → inject nothing.
-    return null
-  }
-
-  if (text.length === 0) return null
-  return {
-    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text },
-  }
-}
-
-export interface StopOutcome {
-  /** Whether a turn was POSTed to /api/ingest. */
-  posted: boolean
-  /** The messages sent (present only when posted). */
-  messages?: HookMessage[]
-  /** Why nothing was posted. */
-  reason?: string
-}
-
-/**
- * Stop → capture. Reads the transcript, extracts the just-finished turn, and POSTs it
- * to /api/ingest with the same { cwd, projectId } project signal recall uses. Swallows
- * ALL errors (capture failure must never disrupt the session).
- */
-export async function runStop(
-  payload: Record<string, unknown>,
-  opts: AdapterOptions = {},
-): Promise<StopOutcome> {
-  const o = resolveOptions(opts)
-  try {
-    const transcriptPath = pickString(payload, ['transcript_path', 'transcriptPath'])
-    if (transcriptPath.length === 0) return { posted: false, reason: 'no_transcript_path' }
-
-    const lastAssistant = pickString(payload, ['last_assistant_message', 'lastAssistantMessage'])
-    const turn = extractLastTurn(o.readTranscript(transcriptPath), lastAssistant)
-    if (turn === null) return { posted: false, reason: 'no_turn' }
-
-    const cwd = pickString(payload, ['cwd'])
-    const projectId = pickString(payload, ['projectId', 'project_id'])
-    const messages: HookMessage[] = [
-      { role: 'user', content: turn.user },
-      { role: 'assistant', content: turn.assistant },
-    ]
-
-    await postJson(
-      `${o.baseUrl}/api/ingest`,
-      {
-        messages,
-        tool: TOOL,
-        ...(cwd.length > 0 ? { cwd } : {}),
-        ...(projectId.length > 0 ? { projectId } : {}),
-      },
-      o,
-    )
-    return { posted: true, messages }
-  } catch {
-    // FAIL-OPEN: any failure (unreadable transcript, daemon down, timeout) → skip capture.
-    return { posted: false, reason: 'error' }
-  }
-}
-
-/**
- * Dispatch a hook event to its handler and return the EXACT string to write to stdout
- * (empty string = write nothing). Never throws: the outer try/catch guarantees that a
- * bug here still degrades to "inject nothing, don't block".
- */
-export async function handleEvent(
-  event: string,
-  payload: Record<string, unknown>,
-  opts: AdapterOptions = {},
-): Promise<string> {
-  try {
-    if (event === 'UserPromptSubmit') {
-      const out = await runUserPromptSubmit(payload, opts)
-      return out === null ? '' : JSON.stringify(out)
-    }
-    if (event === 'Stop') {
-      await runStop(payload, opts)
-      // Emit nothing: exit 0 with no `decision` lets Claude stop normally.
-      return ''
-    }
-    return ''
-  } catch {
-    return ''
-  }
-}
+/** UserPromptSubmit → /api/recall. Shared fail-open behavior remains byte-identical. */
+export const runUserPromptSubmit = adapter.runUserPromptSubmit
+/** Stop → transcript parser → /api/ingest. */
+export const runStop = adapter.runStop
+/** Event dispatcher used by the Claude stdin/stdout shim. */
+export const handleEvent = adapter.handleEvent
