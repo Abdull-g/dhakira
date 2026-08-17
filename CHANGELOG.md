@@ -4,6 +4,34 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-17
+
+The hooks release. Dhakira no longer needs to sit in front of your model as a proxy. `dhakira connect claude-code` and `dhakira connect codex` register native lifecycle hooks, so your tool talks to its own provider exactly as before and Dhakira captures and recalls alongside it. Memory now also carries a project axis, a salience tier, and a lifecycle — it consolidates duplicates and lets go of what stopped mattering, instead of growing forever.
+
+### Added
+- **Native hook adapters for Claude Code and Codex.** `dhakira connect <tool>` writes the hook registration into the tool's own config (`~/.claude/settings.json`, `~/.codex/config.toml`); `dhakira disconnect <tool>` removes exactly what it added. Prompt submission triggers recall, turn completion triggers capture.
+- **Fail-open by design.** Hook calls time out after 1500 ms. If Dhakira is slow, stopped, or missing, your tool proceeds unchanged. Memory is never a dependency of your ability to work.
+- **`POST /api/ingest` and `POST /api/recall`** — delivery-agnostic capture and recall verbs on the local daemon. Both resolve project scope through the same ladder (explicit id → local git read → global), so what a tool captures and what it recalls always agree. Any future adapter needs these two calls and nothing else.
+- **Project-stable context axis** — memory is scoped to the repository you're in, identified by reading `.git/config` off local disk. No network, no `git` subprocess. This is what makes a fact stated in one tool recallable in another within the same project.
+- **Salience tiers** (`core` / `standard` / `trivia`) with model-first scoring and a heuristic fallback. Retrieval and profile synthesis both prefer higher tiers, and `core` memories are immune to expiry.
+- **`dhakira consolidate`** — off-line sweep that clusters near-duplicate memories and merges them. Clustering requires mutual edges above 0.54 (re-calibrated 2026-06-02: unrelated pairs scored 0.516–0.517, genuine near-duplicates 0.554–0.558). A deterministic coverage verifier runs after every merge, so silent data loss is structurally impossible rather than merely unlikely.
+- **`dhakira forget`** — soft, reversible lifecycle. Expired and superseded memories are marked rather than deleted, superseded entries keep a 14-day grace window, and `core`-tier memories are never touched.
+- **Three-layer injection composition** with tiered shared-ceiling budgeting — profile, project document, and retrieved turns compete under one token ceiling instead of each claiming a fixed slice.
+- **Model-control harness** — one seam for every model call the engine makes (extraction, salience, synthesis, consolidation), so capability and backend can change without touching call sites.
+
+### Changed
+- **The CLI and README lead with hooks.** `connect`/`disconnect` sit alongside `start`/`stop`/`status`, and base-URL proxy routing is documented as the secondary path for tools without hook support. The proxy still works and is still tested; hooks are where the investment goes.
+- **Retrieval sits behind a `RetrievalBackend` seam**, drawing an explicit open/closed line between the engine and its storage layer.
+- **Extraction is grammar-constrained to the model's context size** rather than a fixed token limit, fixing truncation on longer inputs.
+- **`package.json`**: added the missing `types` entry point; keywords now describe hooks and agent memory rather than proxy and OAuth. The build script is idempotent — it previously copied dashboard assets into a nested duplicate directory on every rebuild (shipping ~50 kB of duplicates since v0.2.6).
+
+### Fixed
+- **Capture paths are constrained to the wallet directory.** The `tool` value from an ingest request was interpolated straight into a filename, so a crafted value could resolve outside `~/.dhakira`. Path components are now slugged and every capture path is containment-checked against the wallet root; `/api/ingest` rejects separators and `..` outright. The original tool name is still preserved verbatim in file content and metadata, and ordinary filenames are unchanged.
+- **`connect` can no longer destroy an existing tool config.** A syntactically invalid `~/.claude/settings.json` was previously parsed, silently discarded, and replaced — taking MCP server definitions and permissions with it. A missing file still starts fresh, but a file that exists and cannot be parsed now gets a timestamped backup beside it and the operation aborts without writing. Same for the Codex TOML path and both disconnect paths.
+- **All production dependency advisories cleared** (previously 1 critical, 5 high, all transitive). Resolved by refreshing the lockfile within existing semver ranges; no direct dependency changed and the inference engine stays pinned. `npm audit --omit=dev` reports zero.
+- Claude Code's `[SUGGESTION MODE: …]` autocomplete prompts are filtered from extraction as well as capture, so they can't poison profile synthesis.
+- Consolidation matches QMD search hits on canonical ids, fixing merges that silently found no neighbors when ids had been handelized.
+
 ## [0.2.8] - 2026-05-15
 
 The privacy-local-first release. Layer 2 (profile synthesis) now runs end-to-end on a local instruction-tuned model by default — no API keys, no network calls during extraction. The whole extraction engine is decoupled from QMD's internals, so QMD point-releases can no longer break memory synthesis. Phase 1 (fact extraction) and Phase 2 (ADD/UPDATE/INVALIDATE dedup) both honor the same local-first contract.
