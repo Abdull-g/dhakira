@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -37,6 +37,14 @@ describe('projectDocFileName — sanitization', () => {
 
   it('keeps a human-readable slug head', () => {
     expect(projectDocFileName('git:github.com/owner/repo')).toMatch(/^git-github\.com-owner-repo-/)
+  })
+
+  it('contains traversal-shaped project ids inside the wallet', () => {
+    const walletDir = '/tmp/test-wallet'
+    const path = projectDocPath(walletDir, '../../../../tmp/PWNED')
+    const rel = relative(resolve(walletDir), path)
+    expect(rel).not.toBe('..')
+    expect(rel).not.toMatch(/^\.\.[/\\]/)
   })
 })
 

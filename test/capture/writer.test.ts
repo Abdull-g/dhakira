@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CapturedConversation } from '../../src/capture/types.ts'
 import { buildFilePath, writeConversation } from '../../src/capture/writer.ts'
@@ -48,6 +48,32 @@ describe('buildFilePath', () => {
   it('should include the tool name in the filename', () => {
     const path = buildFilePath(WALLET_DIR, makeConversation({ tool: 'claude-code' }))
     expect(path).toContain('claude-code')
+  })
+
+  it('preserves the exact filename for a normal tool name', () => {
+    const timestamp = new Date(2026, 7, 17, 7, 30)
+    const path = buildFilePath(
+      WALLET_DIR,
+      makeConversation({ id: 'conv_abc123', tool: 'claude-code', timestamp }),
+    )
+    expect(basename(path)).toBe('claude-code-07h30m-abc123.md')
+  })
+
+  it('contains traversal attempts from the tool path component', () => {
+    const path = buildFilePath(
+      WALLET_DIR,
+      makeConversation({ tool: '../../../../../../tmp/PWNED' }),
+    )
+    const rel = relative(resolve(WALLET_DIR), path)
+    expect(rel).not.toBe('..')
+    expect(rel).not.toMatch(/^\.\.[/\\]/)
+    expect(basename(path)).toMatch(/^tmp-pwned-\d{2}h\d{2}m-abc123\.md$/)
+  })
+
+  it('falls back to unknown when the tool has no slug characters', () => {
+    expect(basename(buildFilePath(WALLET_DIR, makeConversation({ tool: '../../..' })))).toMatch(
+      /^unknown-\d{2}h\d{2}m-abc123\.md$/,
+    )
   })
 
   it('should end with .md extension', () => {
@@ -129,6 +155,21 @@ describe('writeConversation', () => {
     expect(content).toContain('Hello!')
     expect(content).toContain('## Assistant')
     expect(content).toContain('Hi there!')
+  })
+
+  it('keeps the original tool value in metadata while slugging only the path', async () => {
+    const tool = '../../../../../../tmp/PWNED'
+    const result = await writeConversation(makeConversation({ tool }), WALLET_DIR)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const [, content] = (fsMock.writeFile as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      string,
+      string,
+    ]
+    expect(basename(result.value)).toMatch(/^tmp-pwned-/)
+    expect(content).toContain(`tool: ${tool}`)
   })
 
   it('should mkdir with the parent directory of the file', async () => {

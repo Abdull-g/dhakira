@@ -255,6 +255,24 @@ describe('POST /api/ingest — handler', () => {
     expect(badMessages.status).toBe(400)
   })
 
+  it('tool with path separators or dot-dot → 400 before capture', async () => {
+    await startApi(makeConfig(walletDir))
+
+    for (const tool of ['../../tmp/PWNED', 'claude\\code', 'claude..code']) {
+      const response = await postRaw(JSON.stringify({ messages: realConversation, tool }))
+      expect(response.status).toBe(400)
+      expect(response.body).toMatchObject({
+        ok: false,
+        captured: false,
+        turnPairs: 0,
+        reason: 'invalid_body: tool must not contain path separators or ..',
+      })
+    }
+
+    expect(await readConversations(walletDir)).toHaveLength(0)
+    expect(await readTurns(walletDir)).toHaveLength(0)
+  })
+
   it('incognito → 200 captured:false, NOTHING written', async () => {
     await startApi(makeConfig(walletDir, true))
     const { status, body } = await postRaw(

@@ -323,6 +323,10 @@ function normalizeIngestMessages(value: unknown): NormalizedMessage[] | null {
   return out
 }
 
+function isUnsafeIngestTool(tool: string): boolean {
+  return tool.includes('..') || tool.includes('/') || tool.includes('\\')
+}
+
 /**
  * POST /api/ingest — the generic capture verb. Runs the full hygiene chain via
  * ingestTrace (classify+sanitize+gate ALWAYS run). Honors incognito at the daemon
@@ -362,6 +366,15 @@ async function handleIngest(
       captured: false,
       turnPairs: 0,
       reason: 'invalid_body: expected messages[] and tool',
+    })
+    return
+  }
+  if (isUnsafeIngestTool(tool)) {
+    sendJson(res, 400, {
+      ok: false,
+      captured: false,
+      turnPairs: 0,
+      reason: 'invalid_body: tool must not contain path separators or ..',
     })
     return
   }

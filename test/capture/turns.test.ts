@@ -1,6 +1,6 @@
-import { join } from 'node:path'
+import { basename, join, relative, resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NormalizedMessage } from '../../src/proxy/types.ts'
+import type { TurnPair } from '../../src/capture/turns.ts'
 import {
   buildTurnFilePath,
   extractTurnPairs,
@@ -8,7 +8,7 @@ import {
   storeTurnPairs,
   writeTurnPair,
 } from '../../src/capture/turns.ts'
-import type { TurnPair } from '../../src/capture/turns.ts'
+import type { NormalizedMessage } from '../../src/proxy/types.ts'
 
 vi.mock('node:fs/promises', () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
@@ -177,6 +177,26 @@ describe('buildTurnFilePath', () => {
     const pair = makePair({ sessionId: 'sess_xyz789', turnIndex: 3 })
     const path = buildTurnFilePath(WALLET_DIR, pair)
     expect(path).toMatch(/sess_xyz789-3\.md$/)
+  })
+
+  it('contains traversal attempts from a session id', () => {
+    const pair = makePair({ sessionId: '../../../../outside' })
+    const path = buildTurnFilePath(WALLET_DIR, pair)
+    const rel = relative(resolve(WALLET_DIR), path)
+    expect(rel).not.toBe('..')
+    expect(rel).not.toMatch(/^\.\.[/\\]/)
+    expect(basename(path)).toBe('outside-0.md')
+    expect(formatTurnPair(pair)).toContain('sessionId: ../../../../outside')
+  })
+
+  it('keeps traversal-shaped project ids out of the path', () => {
+    const pair = makePair({ projectId: '../../../../outside' })
+    const path = buildTurnFilePath(WALLET_DIR, pair)
+    const rel = relative(resolve(WALLET_DIR), path)
+    expect(rel).not.toBe('..')
+    expect(rel).not.toMatch(/^\.\.[/\\]/)
+    expect(basename(path)).toBe('conv_abc123-0.md')
+    expect(formatTurnPair(pair)).toContain('projectId: ../../../../outside')
   })
 
   it('expands a leading ~ in walletDir', () => {

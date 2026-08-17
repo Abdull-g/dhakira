@@ -1,11 +1,11 @@
 // Parse captured conversations into individual turn pairs and write them to disk
 import { mkdir, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname } from 'node:path'
 import type { NormalizedMessage, Result } from '../proxy/types.js'
 import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
 import type { ContentBlock, TraceMessage, TraceRole } from './ingest.js'
+import { idPathSlug, resolveContainedCapturePath } from './path-safety.js'
 import { redactSecrets } from './secrets.js'
 
 // ---------------------------------------------------------------------------
@@ -256,13 +256,6 @@ function pad2(n: number): string {
   return n.toString().padStart(2, '0')
 }
 
-function expandPath(p: string): string {
-  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) {
-    return homedir() + p.slice(1)
-  }
-  return p
-}
-
 /**
  * Build the file path for a turn pair.
  * Pattern: {walletDir}/turns/{YYYY-MM-DD}/{sessionId}-{turnIndex}.md
@@ -270,8 +263,10 @@ function expandPath(p: string): string {
 export function buildTurnFilePath(walletDir: string, pair: TurnPair): string {
   const d = new Date(pair.timestamp)
   const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-  const filename = `${pair.sessionId}-${pair.turnIndex}.md`
-  return join(expandPath(walletDir), 'turns', date, filename)
+  const sessionId = idPathSlug(pair.sessionId)
+  const turnIndex = idPathSlug(String(pair.turnIndex), '0')
+  const filename = `${sessionId}-${turnIndex}.md`
+  return resolveContainedCapturePath(walletDir, 'turns', date, filename)
 }
 
 /**
@@ -310,11 +305,10 @@ export function formatTurnPair(pair: TurnPair): string {
  */
 export async function writeTurnPair(pair: TurnPair, walletDir: string): Promise<Result<string>> {
   const logger = createLogger('capture:turns')
-  const filePath = buildTurnFilePath(walletDir, pair)
-  const dir = filePath.substring(0, filePath.lastIndexOf('/'))
 
   try {
-    await mkdir(dir, { recursive: true })
+    const filePath = buildTurnFilePath(walletDir, pair)
+    await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, formatTurnPair(pair), 'utf8')
     logger.info('Turn pair saved', { id: pair.id, path: filePath })
     return { ok: true, value: filePath }
@@ -346,12 +340,11 @@ export async function writeTurnPairWithContent(
   walletDir: string,
 ): Promise<Result<StoredTurnPair>> {
   const logger = createLogger('capture:turns')
-  const filePath = buildTurnFilePath(walletDir, pair)
-  const dir = filePath.substring(0, filePath.lastIndexOf('/'))
-  const content = formatTurnPair(pair)
 
   try {
-    await mkdir(dir, { recursive: true })
+    const filePath = buildTurnFilePath(walletDir, pair)
+    const content = formatTurnPair(pair)
+    await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, content, 'utf8')
     logger.info('Turn pair saved', { id: pair.id, path: filePath })
     return { ok: true, value: { filePath, content } }

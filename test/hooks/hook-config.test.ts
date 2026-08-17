@@ -1,9 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-
-import { afterEach, describe, expect, it } from 'vitest'
+import { basename, dirname, join } from 'node:path'
 import { parse } from 'smol-toml'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   mergeClaudeHooks,
@@ -42,6 +41,38 @@ function dhakiraCount(root: Record<string, unknown>, event: string): number {
         typeof handler.command === 'string' && handler.command.includes('dhakira-hook.mjs'),
     )
   }).length
+}
+
+type ConfigAction = (path: string) => Promise<void>
+
+async function expectBackupAndAbort(
+  filename: string,
+  raw: string,
+  action: ConfigAction,
+): Promise<void> {
+  const path = await tempFile(filename)
+  await writeFile(path, raw, 'utf8')
+
+  const caught = await action(path).then(
+    () => null,
+    (error: unknown) => error,
+  )
+  expect(caught).toBeInstanceOf(Error)
+  const message = caught instanceof Error ? caught.message : String(caught)
+  expect(message).toContain('No changes were made.')
+  expect(await readFile(path, 'utf8')).toBe(raw)
+
+  const backupPrefix = `${basename(path)}.dhakira-backup-`
+  const backups = (await readdir(dirname(path))).filter((name) => name.startsWith(backupPrefix))
+  expect(backups).toHaveLength(1)
+  const backupName = backups[0]
+  expect(backupName).toBeDefined()
+  if (!backupName) return
+
+  const backupPath = join(dirname(path), backupName)
+  expect(message).toContain(backupPath)
+  expect(await readFile(backupPath, 'utf8')).toBe(raw)
+  expect((await stat(backupPath)).mode & 0o777).toBe((await stat(path)).mode & 0o777)
 }
 
 describe('Codex hook config', () => {
@@ -154,5 +185,36 @@ describe('Claude hook config regression', () => {
 
     await removeClaudeHooks(path)
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(original)
+  })
+})
+
+describe('unparseable hook config protection', () => {
+  it('backs up malformed JSON and aborts both connect and disconnect', async () => {
+    const malformed = '{"permissions": {"allow": ["Read"]}'
+    await expectBackupAndAbort('merge-settings.json', malformed, (path) =>
+      mergeClaudeHooks(HOOK_PATH, path),
+    )
+    await expectBackupAndAbort('remove-settings.json', malformed, removeClaudeHooks)
+  })
+
+  it('backs up malformed TOML and aborts both connect and disconnect', async () => {
+    const malformed = '[mcp_servers.example\ncommand = "node"'
+    await expectBackupAndAbort('merge-config.toml', malformed, (path) =>
+      mergeCodexHooks(HOOK_PATH, path),
+    )
+    await expectBackupAndAbort('remove-config.toml', malformed, removeCodexHooks)
+  })
+
+  it('treats empty-but-present files as unsafe for every write path', async () => {
+    const cases: Array<[string, ConfigAction]> = [
+      ['merge-empty-settings.json', (path) => mergeClaudeHooks(HOOK_PATH, path)],
+      ['remove-empty-settings.json', removeClaudeHooks],
+      ['merge-empty-config.toml', (path) => mergeCodexHooks(HOOK_PATH, path)],
+      ['remove-empty-config.toml', removeCodexHooks],
+    ]
+
+    for (const [filename, action] of cases) {
+      await expectBackupAndAbort(filename, '', action)
+    }
   })
 })

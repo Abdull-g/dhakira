@@ -4,7 +4,7 @@
 // under [hooks] in config.toml. Format-specific I/O stays at the edge while the
 // marker-guarded merge/removal rules live in one place.
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -121,8 +121,59 @@ function parseCodexConfig(raw: string): ConfigRoot {
   return parse(raw, { integersAsBigInt: true }) as ConfigRoot
 }
 
+function parseClaudeConfig(raw: string): ConfigRoot {
+  const parsed: unknown = JSON.parse(raw)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('expected a JSON object at the top level')
+  }
+  return parsed as ConfigRoot
+}
+
 function stringifyCodexConfig(root: ConfigRoot): string {
   return stringify(root, { numbersAsFloat: true })
+}
+
+function timestampedBackupPath(configPath: string): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  return `${configPath}.dhakira-backup-${timestamp}`
+}
+
+async function abortUnparseableConfig(
+  configPath: string,
+  raw: string,
+  label: string,
+  cause: unknown,
+): Promise<never> {
+  const backupPath = timestampedBackupPath(configPath)
+  try {
+    const sourceMode = await stat(configPath)
+      .then((file) => file.mode & 0o777)
+      .catch(() => 0o600)
+    await writeFile(backupPath, raw, { encoding: 'utf8', flag: 'wx', mode: sourceMode })
+  } catch (backupError) {
+    throw new Error(
+      `Could not parse ${label} at ${configPath}. No changes were made. Could not write a backup beside it: ${String(backupError)}`,
+      { cause },
+    )
+  }
+  throw new Error(
+    `Could not parse ${label} at ${configPath}. Backup written to ${backupPath}. No changes were made.`,
+    { cause },
+  )
+}
+
+async function parseExistingConfig(
+  configPath: string,
+  raw: string,
+  label: string,
+  parser: (value: string) => ConfigRoot,
+): Promise<ConfigRoot> {
+  try {
+    if (raw.trim().length === 0) throw new Error('config file is empty')
+    return parser(raw)
+  } catch (error) {
+    return abortUnparseableConfig(configPath, raw, label, error)
+  }
 }
 
 export async function mergeClaudeHooks(
@@ -130,23 +181,19 @@ export async function mergeClaudeHooks(
   settingsPath = claudeSettingsPath(),
 ): Promise<void> {
   await mkdir(dirname(settingsPath), { recursive: true })
-  let root: ConfigRoot = {}
-  try {
-    root = JSON.parse(await readFile(settingsPath, 'utf8')) as ConfigRoot
-  } catch {
-    // Preserve Claude's established behavior: missing/unreadable/invalid starts fresh.
-  }
+  const raw = await readOptional(settingsPath)
+  const root =
+    raw === null
+      ? {}
+      : await parseExistingConfig(settingsPath, raw, 'Claude settings', parseClaudeConfig)
   mergeDhakiraHooks(root, hookPath)
   await writeFile(settingsPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8')
 }
 
 export async function removeClaudeHooks(settingsPath = claudeSettingsPath()): Promise<void> {
-  let root: ConfigRoot
-  try {
-    root = JSON.parse(await readFile(settingsPath, 'utf8')) as ConfigRoot
-  } catch {
-    return
-  }
+  const raw = await readOptional(settingsPath)
+  if (raw === null) return
+  const root = await parseExistingConfig(settingsPath, raw, 'Claude settings', parseClaudeConfig)
   removeDhakiraHooks(root)
   await writeFile(settingsPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8')
 }
@@ -157,15 +204,16 @@ export async function mergeCodexHooks(
 ): Promise<void> {
   await mkdir(dirname(configPath), { recursive: true })
   const raw = await readOptional(configPath)
-  const root = raw === null || raw.trim().length === 0 ? {} : parseCodexConfig(raw)
+  const root =
+    raw === null ? {} : await parseExistingConfig(configPath, raw, 'Codex config', parseCodexConfig)
   mergeDhakiraHooks(root, hookPath)
   await writeFile(configPath, stringifyCodexConfig(root), 'utf8')
 }
 
 export async function removeCodexHooks(configPath = codexConfigPath()): Promise<void> {
   const raw = await readOptional(configPath)
-  if (raw === null || raw.trim().length === 0) return
-  const root = parseCodexConfig(raw)
+  if (raw === null) return
+  const root = await parseExistingConfig(configPath, raw, 'Codex config', parseCodexConfig)
   removeDhakiraHooks(root)
   await writeFile(configPath, stringifyCodexConfig(root), 'utf8')
 }
