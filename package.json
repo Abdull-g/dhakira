@@ -1,7 +1,8 @@
 {
   "name": "dhakira",
-  "version": "0.2.8",
-  "description": "Your AI, with memory. Local-first portable AI memory system.",
+  "version": "0.3.0",
+  "description": "Portable AI memory you own. Local-first memory engine with native hooks for Claude Code and Codex.",
+  "author": "Dhakira",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
@@ -10,13 +11,14 @@
     "dhakira": "dist/cli.js"
   },
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && cp -r src/dashboard/public dist/dashboard/public",
+    "build": "tsc && rm -rf dist/dashboard/public && cp -r src/dashboard/public dist/dashboard/public",
     "start": "node dist/cli.js start",
     "dev": "tsx src/cli.ts start",
     "test": "vitest",
@@ -30,15 +32,16 @@
     "ai",
     "memory",
     "local-first",
-    "proxy",
     "dhakira",
     "claude",
-    "cursor",
-    "subscription",
     "anthropic",
-    "oauth",
     "openai",
-    "aider"
+    "hooks",
+    "claude-code",
+    "codex",
+    "ai-memory",
+    "agent-memory",
+    "context"
   ],
   "repository": {
     "type": "git",

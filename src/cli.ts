@@ -476,17 +476,17 @@ function printHelp(): void {
 
   ${c.bold('Commands:')}
     ${c.cyan('init')}       Set up Dhakira (API key or Claude Max/Pro subscription)
-    ${c.cyan('start')}      Start the proxy and dashboard
+    ${c.cyan('start')}      Start Dhakira (daemon, hooks, dashboard)
     ${c.cyan('stop')}       Stop a running Dhakira instance
     ${c.cyan('status')}     Show current status and statistics
+    ${c.cyan('connect')}    Wire tool hooks into Dhakira ("dhakira connect <claude-code|codex>")
+    ${c.cyan('disconnect')} Remove tool hooks ("dhakira disconnect <claude-code|codex>")
     ${c.cyan('profile')}    Show your generated memory profile
     ${c.cyan('record')}     Save a fact to your memory ("dhakira record "fact"")
     ${c.cyan('search')}     Search your captured memories ("dhakira search "query"")
     ${c.cyan('extract')}    Regenerate your profile from captured conversations
     ${c.cyan('consolidate')} Distill redundant memories into denser ones
     ${c.cyan('forget')}     Soft-forget expired + aged-superseded memories
-    ${c.cyan('connect')}    Wire tool hooks into Dhakira ("dhakira connect <claude-code|codex>")
-    ${c.cyan('disconnect')} Remove tool hooks ("dhakira disconnect <claude-code|codex>")
     ${c.cyan('reset')}      Delete your wallet and start fresh
     ${c.cyan('help')}       Show this help message
 
@@ -647,14 +647,11 @@ async function commandInit(): Promise<void> {
 
   console.log(`  ${c.bold('Next steps:')}`)
   console.log('')
-  console.log(`  ${c.dim('# Claude Code')}`)
-  console.log(`  export ANTHROPIC_BASE_URL=http://localhost:4100`)
-  console.log(`  claude`)
+  console.log(`  ${c.dim('# Connect your tools')}`)
+  console.log(`  dhakira connect claude-code`)
+  console.log(`  dhakira connect codex`)
   console.log('')
-  console.log(`  ${c.dim('# aider')}`)
-  console.log(`  aider --openai-api-base http://localhost:4100/v1`)
-  console.log('')
-  console.log(`  ${c.dim('# Any OpenAI-compatible tool')}`)
+  console.log(`  ${c.dim('# Other tools (base-URL routing)')}`)
   console.log(`  export OPENAI_BASE_URL=http://localhost:4100/v1`)
   console.log('')
 
