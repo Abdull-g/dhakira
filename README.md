@@ -509,7 +509,7 @@ Toggle in the dashboard or set `incognito: true`. Dhakira stops capturing and in
 
 Dhakira is local-first, and local-first has costs. They're worth knowing before you install it.
 
-**It uses your machine's resources.** ~2.25 GB of models on first run, and Node.js 22+. Search adds 50–400ms to a prompt depending on wallet size.
+**It uses your machine's resources.** ~2.25 GB of models on first run, and Node.js 22+. Retrieval runs models locally, so it wants GPU acceleration — any Apple Silicon Mac or a machine with a modern GPU is fine. Without acceleration, an uncached search can exceed the 1.5-second hook budget, in which case the hook gives up and your tool continues without memory. No error, nothing broken — just no recall. Old CPU-only hardware is not a good fit.
 
 **Memory quality depends on your model.** Extraction, salience, and synthesis run on a local 1.7B model by default. It's genuinely useful. A frontier model is sharper. You can point extraction at a stronger endpoint, but then that part of the pipeline isn't local anymore — that's your call to make, not ours.
 
@@ -526,6 +526,7 @@ Dhakira is for people who use several AI tools and want their context to follow 
 - **Node.js 22+**
 - **~2.25 GB disk** for local models (one-time download on first run)
 - macOS and Linux. Intel and ARM.
+- **GPU acceleration recommended.** Retrieval runs local models; without acceleration some searches will exceed the hook's 1.5-second budget and be skipped.
 
 ## FAQ
 
@@ -536,7 +537,7 @@ No. Hooks talk to the daemon directly and your tool reaches its provider on its 
 On the hook path, nothing. Each hook call times out at 1.5 seconds and returns empty, so your tool proceeds without memory. On the proxy path, your tool gets "connection refused" — restart Dhakira, or unset the base-URL variable to reach your provider directly.
 
 **Does Dhakira slow down my AI tool?**
-Search takes 50–400ms depending on wallet size. Models warm up at `dhakira start`, so your first prompt doesn't wait for a download. Capture, consolidation, and profile synthesis are all async and never block you.
+No. The hook path is capped at 1.5 seconds and fails open, so the worst case is a brief pause and no injected memory. Models warm up at `dhakira start`, so your first prompt doesn't wait for a download, and repeated queries are faster because expansion results are cached. Capture, consolidation, and profile synthesis are all async and never block you. If your machine has no GPU acceleration, expect some searches to miss the budget and be skipped.
 
 **How is this different from Claude's built-in memory?**
 Claude's memory only works in Claude. Codex's only works in Codex. Dhakira's memory is keyed to your project, not to a vendor — so a decision you made in Codex shows up when you open Claude Code in the same repo. Platform memory is locked in. Yours shouldn't be.
