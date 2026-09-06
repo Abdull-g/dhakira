@@ -23,6 +23,7 @@ vi.mock('../../src/extraction/runner.js', () => ({
 }))
 
 const { createApiHandler } = await import('../../src/dashboard/api.ts')
+const { recordRecall, resetRetrievalMetrics } = await import('../../src/retrieval/metrics.ts')
 
 let walletDir: string
 let server: Server
@@ -41,6 +42,7 @@ function makeConfig(): WalletConfig {
       apiKey: '',
       baseUrl: 'https://api.openai.com/v1',
     },
+    retrieval: { modelsResident: true },
     injection: {
       maxTokens: 1800,
       minRelevanceScore: 0.3,
@@ -195,6 +197,24 @@ describe('dashboard API', () => {
     const response = await request('PUT', '/api/profile', { content: 'nope' })
 
     expect(response.status).toBe(404)
+  })
+
+  it('GET /api/status surfaces recall latency + timeout counters (D2 visibility)', async () => {
+    resetRetrievalMetrics()
+    recordRecall(120, false)
+    recordRecall(950, true)
+
+    const response = await request('GET', '/api/status')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      recallCount: 2,
+      recallTimeouts: 1,
+      lastRecallMs: 950,
+      maxRecallMs: 950,
+      modelsResident: true,
+    })
+    expect(typeof response.body.lastRecallTimeoutAt).toBe('string')
   })
 
   it('GET /api/status includes userRecordsCount and lastExtractionAt', async () => {

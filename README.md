@@ -402,6 +402,16 @@ injection:
   recencyBoost: 0.3       # Favor more recent conversations
   maxTurns: 8             # Max past conversations to inject
 
+retrieval:
+  # Keep the three search models (query expansion, embedding, reranker) loaded
+  # for the daemon's lifetime — about 2 GB of RAM while resident. Default true:
+  # otherwise they unload after 5 idle minutes and the first recall after any
+  # pause spends the hook's whole 1.5 s budget reloading them, so you silently
+  # get no memory on that prompt. Set false on RAM-constrained machines; the
+  # daemon still answers inside the budget (BM25 keyword search) while models
+  # warm up in the background. `dhakira doctor` shows which path you're on.
+  modelsResident: true
+
 extraction:
   # Profile synthesis defaults to a local 1.7B model — zero API calls.
   # To use a stronger external model instead, fill these in:

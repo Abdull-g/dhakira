@@ -107,6 +107,18 @@ describe('loadConfig', () => {
       expect(result.value.capture.debug).toBe(true)
     })
 
+    it('retrieval.modelsResident defaults to true and can be switched off (D2)', async () => {
+      vi.mocked(fsMock.readFile).mockResolvedValue(VALID_YAML as never)
+      const withDefault = await loadConfig()
+      expect(withDefault.ok && withDefault.value.retrieval.modelsResident).toBe(true)
+
+      vi.mocked(fsMock.readFile).mockResolvedValue(
+        `${VALID_YAML}\nretrieval:\n  modelsResident: false\n` as never,
+      )
+      const switchedOff = await loadConfig()
+      expect(switchedOff.ok && switchedOff.value.retrieval.modelsResident).toBe(false)
+    })
+
     it('should parse incognito flag', async () => {
       vi.mocked(fsMock.readFile).mockResolvedValue(VALID_YAML as never)
       const result = await loadConfig()
@@ -242,9 +254,7 @@ tools:
     })
 
     it('should fall back to defaults for unrecognised injection fields', async () => {
-      vi.mocked(fsMock.readFile).mockResolvedValue(
-        'injection:\n  maxTokens: 500\n' as never,
-      )
+      vi.mocked(fsMock.readFile).mockResolvedValue('injection:\n  maxTokens: 500\n' as never)
       const result = await loadConfig()
       expect(result.ok).toBe(true)
       if (!result.ok) return

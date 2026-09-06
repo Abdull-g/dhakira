@@ -51,7 +51,9 @@ vi.mock('@tobilu/qmd', () => ({
     return {
       reindex,
       search,
-      searchLex: vi.fn(),
+      // v0.3.1: an empty-but-ok hybrid result now falls back to BM25 (defect #13),
+      // so searchLex must answer like QMD does — with an array (here: no hits).
+      searchLex: vi.fn().mockResolvedValue([]),
       listCollections: async () => collectionEntries.map(([name]) => name),
       close: vi.fn(),
     }

@@ -66,6 +66,7 @@ function makeConfig(walletDir: string): WalletConfig {
       apiKey: 'sk-test',
       baseUrl: 'https://api.openai.com/v1',
     },
+    retrieval: { modelsResident: true },
     injection: {
       maxTokens: 1800,
       minRelevanceScore: 0.3,

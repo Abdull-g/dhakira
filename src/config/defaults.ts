@@ -32,6 +32,11 @@ export function getDefaults(): WalletConfig {
       consolidate: false,
     },
 
+    retrieval: {
+      // D2: resident by default — see schema.ts for the RAM cost.
+      modelsResident: true,
+    },
+
     injection: {
       maxTokens: 1800,
       minRelevanceScore: 0.3,

@@ -30,6 +30,12 @@ export interface TurnSearchOptions {
   projectId?: string
   /** Project scoping mode — see ScopeMode. Defaults to 'boost'. */
   scopeMode?: ScopeMode
+  /**
+   * Override for the daemon-side hybrid deadline (ms). Defaults to
+   * HYBRID_DEADLINE_MS (search.ts). Tests and `dhakira doctor` use this; hook
+   * traffic never sets it.
+   */
+  hybridDeadlineMs?: number
 }
 
 export interface TurnSearchResult {

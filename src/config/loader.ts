@@ -77,6 +77,7 @@ function mergeWithDefaults(raw: unknown): WalletConfig {
   const dashRaw = isRecord(raw.dashboard) ? raw.dashboard : {}
   const captureRaw = isRecord(raw.capture) ? raw.capture : {}
   const extractionRaw = isRecord(raw.extraction) ? raw.extraction : {}
+  const retrievalRaw = isRecord(raw.retrieval) ? raw.retrieval : {}
   const injectionRaw = isRecord(raw.injection) ? raw.injection : {}
 
   const walletDir = expandPath(getString(raw.walletDir, d.walletDir))
@@ -102,6 +103,9 @@ function mergeWithDefaults(raw: unknown): WalletConfig {
       baseUrl: getString(extractionRaw.baseUrl, d.extraction.baseUrl),
       // Missing → false (dark by default).
       consolidate: getBoolean(extractionRaw.consolidate, d.extraction.consolidate ?? false),
+    },
+    retrieval: {
+      modelsResident: getBoolean(retrievalRaw.modelsResident, d.retrieval.modelsResident),
     },
     injection: {
       maxTokens: getNumber(injectionRaw.maxTokens, d.injection.maxTokens),

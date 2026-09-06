@@ -1,6 +1,7 @@
 import type { HybridQueryResult, SearchResult as QMDSearchResult, QMDStore } from '@tobilu/qmd'
-import { describe, expect, it, vi } from 'vitest'
-import { searchTurns } from '../../src/retrieval/search.ts'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { getRetrievalMetrics, resetRetrievalMetrics } from '../../src/retrieval/metrics.ts'
+import { HYBRID_DEADLINE_MS, searchTurns } from '../../src/retrieval/search.ts'
 
 function makeQMDResult(overrides: Partial<QMDSearchResult> = {}): QMDSearchResult {
   return {
@@ -417,6 +418,113 @@ describe('searchTurns', () => {
         new Error('Lexical also failed'),
       )
       await expect(searchTurns(store, { query: 'test' })).resolves.not.toThrow()
+    })
+
+    // v0.3.1 — audit defect #13: the fallback used to trigger ONLY on throw. An
+    // empty-but-successful hybrid result was returned as the final answer.
+    it('falls back to searchLex when hybrid returns EMPTY but successful (defect #13)', async () => {
+      const lexResult = makeQMDResult({
+        filepath: '/wallet/turns/2026-03-26/sess_xyz789-0.md',
+        body: makeTurnBody(),
+        score: 0.6,
+      })
+      const store = makeTurnStore(async () => [], vi.fn().mockResolvedValue([lexResult]))
+      const result = await searchTurns(store, { query: 'pooling', minScore: 0 })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.value).toHaveLength(1)
+      expect(result.value[0]?.turnPair.id).toBe('turn_abc123')
+      expect(store.searchLex).toHaveBeenCalledTimes(1)
+    })
+
+    it('does NOT consult searchLex when hybrid returns hits', async () => {
+      const store = makeTurnStore(async () => [makeHybridResult({ score: 0.9 })])
+      const result = await searchTurns(store, { query: 'pooling', minScore: 0 })
+      expect(result.ok && result.value).toHaveLength(1)
+      expect(store.searchLex).not.toHaveBeenCalled()
+    })
+
+    it('legitimately-empty wallet: hybrid empty AND BM25 empty → ok with zero results', async () => {
+      const store = makeTurnStore(async () => [])
+      const result = await searchTurns(store, { query: 'anything' })
+      expect(result.ok && result.value).toEqual([])
+    })
+  })
+
+  // v0.3.1 — audit D2: cold models make hybrid slow, the hook aborts at 1.5 s and
+  // fails open (silent "no memory"). The daemon now serves BM25 after a deadline
+  // that stays well under the hook budget.
+  describe('daemon-side hybrid deadline (D2)', () => {
+    beforeEach(() => resetRetrievalMetrics())
+
+    it('HYBRID_DEADLINE_MS stays comfortably below the 1.5 s hook budget', () => {
+      expect(HYBRID_DEADLINE_MS).toBeLessThanOrEqual(1000)
+      expect(HYBRID_DEADLINE_MS).toBeGreaterThan(0)
+    })
+
+    it('serves BM25 when hybrid misses the deadline and lets hybrid finish in the background', async () => {
+      let resolveHybrid: (r: HybridQueryResult[]) => void = () => {}
+      const hybridPromise = new Promise<HybridQueryResult[]>((resolve) => {
+        resolveHybrid = resolve
+      })
+      const lexResult = makeQMDResult({
+        filepath: '/wallet/turns/2026-03-26/sess_xyz789-0.md',
+        body: makeTurnBody({ userContent: 'served by bm25' }),
+        score: 0.6,
+      })
+      const store = makeTurnStore(() => hybridPromise, vi.fn().mockResolvedValue([lexResult]))
+
+      const started = Date.now()
+      const result = await searchTurns(store, {
+        query: 'pooling',
+        minScore: 0,
+        hybridDeadlineMs: 30,
+      })
+      const elapsed = Date.now() - started
+
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.value[0]?.turnPair.userContent).toBe('served by bm25')
+      expect(elapsed).toBeLessThan(1000)
+      expect(store.searchLex).toHaveBeenCalledTimes(1)
+
+      // Telemetry: the deadline hit is counted (this is what /api/status + doctor read).
+      const metrics = getRetrievalMetrics()
+      expect(metrics.recallCount).toBe(1)
+      expect(metrics.recallTimeouts).toBe(1)
+      expect(metrics.lastRecallTimeoutAt).not.toBeNull()
+
+      // The late hybrid result is discarded without throwing (background warm-up).
+      resolveHybrid([makeHybridResult()])
+      await hybridPromise
+    })
+
+    it('uses the hybrid result when it beats the deadline (no BM25 call, no timeout counted)', async () => {
+      const store = makeTurnStore(async () => [makeHybridResult({ score: 0.9 })])
+      const result = await searchTurns(store, {
+        query: 'pooling',
+        minScore: 0,
+        hybridDeadlineMs: 500,
+      })
+      expect(result.ok && result.value).toHaveLength(1)
+      expect(store.searchLex).not.toHaveBeenCalled()
+      expect(getRetrievalMetrics().recallTimeouts).toBe(0)
+      expect(getRetrievalMetrics().recallCount).toBe(1)
+    })
+
+    it('a hybrid rejection AFTER the deadline fired is swallowed (fail-open, background)', async () => {
+      let rejectHybrid: (e: Error) => void = () => {}
+      const hybridPromise = new Promise<HybridQueryResult[]>((_resolve, reject) => {
+        rejectHybrid = reject
+      })
+      const store = makeTurnStore(
+        () => hybridPromise,
+        async () => [],
+      )
+      const result = await searchTurns(store, { query: 'x', hybridDeadlineMs: 20 })
+      expect(result.ok && result.value).toEqual([])
+      rejectHybrid(new Error('model load failed late'))
+      await hybridPromise.catch(() => {})
     })
   })
 })

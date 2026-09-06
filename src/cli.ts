@@ -487,6 +487,7 @@ function printHelp(): void {
     ${c.cyan('extract')}    Regenerate your profile from captured conversations
     ${c.cyan('consolidate')} Distill redundant memories into denser ones
     ${c.cyan('forget')}     Soft-forget expired + aged-superseded memories
+    ${c.cyan('doctor')}     Measure recall latency against the 1.5s hook budget
     ${c.cyan('reset')}      Delete your wallet and start fresh
     ${c.cyan('help')}       Show this help message
 
@@ -582,7 +583,13 @@ async function commandInit(): Promise<void> {
   await mkdir(join(walletDir, 'memories'), { recursive: true })
   await writeFile(
     join(walletDir, 'config.yaml'),
-    generateConfigYaml(detected, detectedLocal, addAnthropicWildcard, addOpenAIWildcard, extractionTool),
+    generateConfigYaml(
+      detected,
+      detectedLocal,
+      addAnthropicWildcard,
+      addOpenAIWildcard,
+      extractionTool,
+    ),
     'utf8',
   )
   console.log(`  ${c.green('✓')} Wallet: ${c.cyan(tildePath(walletDir))}`)
@@ -1098,6 +1105,55 @@ export async function commandProfile(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// doctor — recall latency vs the 1.5s hook budget (D2)
+// ---------------------------------------------------------------------------
+
+async function commandDoctor(): Promise<void> {
+  const { loadConfig } = await import('./config/loader.js')
+  const configResult = await loadConfig()
+  if (!configResult.ok) {
+    console.error(c.red(`Failed to load config: ${configResult.error.message}`))
+    process.exit(1)
+  }
+
+  const { runDoctor } = await import('./doctor.js')
+  const report = await runDoctor({ config: configResult.value })
+  const { recall } = report
+
+  const pathLabel: Record<typeof recall.path, string> = {
+    daemon: 'daemon /api/recall (hybrid, what a hook sees)',
+    hybrid: 'hybrid (in-process)',
+    'bm25-deadline': `BM25 — hybrid missed the ${report.hybridDeadlineMs} ms deadline`,
+    'bm25-only': 'BM25 only — search models not downloaded',
+    error: 'failed',
+  }
+  const budgetNote = `${c.dim(`(budget ${report.hookBudgetMs} ms · daemon deadline ${report.hybridDeadlineMs} ms)`)}`
+  const timeColor = recall.measuredMs < report.hookBudgetMs ? c.green : c.red
+  const verdictLine =
+    report.verdict === 'pass'
+      ? c.green('PASS — recall answers inside the hook budget')
+      : c.yellow('WARN — see notes')
+
+  console.log(`
+  ${c.bold('dhakira doctor')}
+  ${c.dim('━━━━━━━━━━━━━━')}
+  Daemon:      ${report.daemonRunning ? c.green('running') : c.dim('stopped')} ${c.dim(`(${configResult.value.dashboard.host}:${configResult.value.dashboard.port})`)}
+  Models:      ${report.modelsPresent ? c.green('downloaded') : c.yellow('not downloaded')}
+  Resident:    ${report.modelsResident ? c.green('yes') : c.yellow('no')} ${c.dim('(retrieval.modelsResident)')}
+  Recall path: ${pathLabel[recall.path]}
+  Recall time: ${timeColor(`${recall.measuredMs} ms`)} ${budgetNote}
+  Turns found: ${recall.turnCount}${
+    report.daemonMetrics
+      ? `\n  Timeouts:    ${report.daemonMetrics.recallTimeouts} of ${report.daemonMetrics.recallCount} recalls served by BM25 since daemon start`
+      : ''
+  }
+  Verdict:     ${verdictLine}
+`)
+  for (const note of report.notes) console.log(`  ${c.dim('•')} ${note}`)
+  if (report.notes.length > 0) console.log('')
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -1144,6 +1200,9 @@ async function run(): Promise<void> {
       break
     case 'forget':
       await commandForget()
+      break
+    case 'doctor':
+      await commandDoctor()
       break
     case 'help':
     case '--help':

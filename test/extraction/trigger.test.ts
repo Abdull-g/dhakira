@@ -22,6 +22,7 @@ function makeConfig(overrides: Partial<WalletConfig['extraction']> = {}): Wallet
       baseUrl: 'https://api.openai.com/v1',
       ...overrides,
     },
+    retrieval: { modelsResident: true },
     injection: {
       maxTokens: 1800,
       minRelevanceScore: 0.3,

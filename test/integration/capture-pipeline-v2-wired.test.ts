@@ -32,6 +32,7 @@ function makeConfig(walletDir: string, pipelineVersion: 'v1' | 'v2'): WalletConf
       apiKey: '',
       baseUrl: 'https://api.openai.com/v1',
     },
+    retrieval: { modelsResident: true },
     injection: { maxTokens: 1800, minRelevanceScore: 0.3, recencyBoost: 0.3, maxTurns: 8 },
     incognito: false,
   }

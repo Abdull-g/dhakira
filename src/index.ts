@@ -437,7 +437,12 @@ export async function main(): Promise<void> {
     }
   }
 
-  const storeResult = await createWalletStore(config.walletDir)
+  // D2: keep search models resident (config retrieval.modelsResident, default true)
+  // so the first recall after an idle period does not reload ~2 GB of models
+  // inside the hook's 1.5 s budget.
+  const storeResult = await createWalletStore(config.walletDir, {
+    modelsResident: config.retrieval.modelsResident,
+  })
   if (!storeResult.ok) {
     throw new Error(`Failed to initialize QMD store: ${storeResult.error.message}`)
   }

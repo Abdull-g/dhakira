@@ -43,23 +43,92 @@ export function parseTurnPairFromBody(body: string): TurnPair | null {
   }
 }
 
+export interface LoadCandidatesOptions {
+  /**
+   * Daemon-side deadline (ms) for the hybrid search. When it fires, BM25
+   * (`searchLex`) is served immediately and the hybrid search is left running in
+   * the background (it warms the models for the next call). Undefined = no
+   * deadline (wait for hybrid).
+   */
+  deadlineMs?: number
+  /** Called once if the deadline fires (telemetry). */
+  onDeadline?: () => void
+}
+
+/** Sentinel returned by the race when the deadline wins. */
+const DEADLINE: unique symbol = Symbol('hybrid-deadline')
+
+function raceDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof DEADLINE> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(DEADLINE), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err: unknown) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
+}
+
 /**
- * Load raw candidates from the backend: attempt hybrid search, fall back to BM25
- * (`searchLex`) on failure (e.g. embedding models not yet loaded on cold start).
+ * Load raw candidates from the backend.
+ *
+ * Order of preference (v0.3.1, audit D2 + defect #13):
+ *   1. hybrid search (BM25 + vector + rerank) when it answers in time with hits;
+ *   2. BM25 (`searchLex`) when hybrid
+ *      a. misses the daemon deadline (cold models — hybrid keeps running in the
+ *         background so the NEXT call is warm),
+ *      b. returns EMPTY but successful (previously returned as the final answer;
+ *         BM25 hits were the hybrid seed set, so this can never add noise), or
+ *      c. throws (models unavailable).
+ * Never throws for a hybrid failure; a BM25 failure propagates to searchTurns.
  */
 export async function loadCandidates(
   backend: RetrievalBackend,
   query: string,
   fetchLimit: number,
+  options: LoadCandidatesOptions = {},
 ): Promise<RawCandidate[]> {
   const logger = createLogger('retrieval')
+  const lex = (): Promise<RawCandidate[]> =>
+    backend.searchLex(query, { collection: 'turns', limit: fetchLimit })
 
+  const hybrid = backend.search({ query, collection: 'turns', limit: fetchLimit })
+  let hits: RawCandidate[] | typeof DEADLINE
   try {
-    return await backend.search({ query, collection: 'turns', limit: fetchLimit })
+    hits =
+      options.deadlineMs === undefined
+        ? await hybrid
+        : await raceDeadline(hybrid, options.deadlineMs)
   } catch (hybridErr) {
     logger.warn('Hybrid search unavailable, falling back to BM25', {
       error: hybridErr instanceof Error ? hybridErr.message : String(hybridErr),
     })
-    return backend.searchLex(query, { collection: 'turns', limit: fetchLimit })
+    return lex()
   }
+
+  if (hits === DEADLINE) {
+    logger.warn('Hybrid search missed the daemon deadline, serving BM25', {
+      deadlineMs: options.deadlineMs,
+    })
+    options.onDeadline?.()
+    // Let hybrid finish in the background — it is what loads/warms the models.
+    hybrid.then(
+      (late) => logger.debug('Late hybrid result discarded', { candidates: late.length }),
+      (err: unknown) =>
+        logger.debug('Late hybrid search failed', {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+    )
+    return lex()
+  }
+
+  if (hits.length > 0) return hits
+
+  logger.debug('Hybrid returned 0 candidates, trying BM25')
+  return lex()
 }

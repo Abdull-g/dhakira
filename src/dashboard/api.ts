@@ -13,6 +13,7 @@ import { runExtraction } from '../extraction/runner.js'
 import { ingestTrace, resolveIngestProjectId } from '../ingest.js'
 import type { NormalizedMessage } from '../proxy/types.js'
 import { recallOnce } from '../recall.js'
+import { getRetrievalMetrics } from '../retrieval/metrics.js'
 import { searchTurns } from '../retrieval/search.js'
 import { createLogger } from '../utils/logger.js'
 
@@ -187,6 +188,9 @@ async function getLastExtractionAt(walletDir: string): Promise<string | null> {
 async function handleGetStatus(res: ServerResponse, config: WalletConfig): Promise<void> {
   const [{ turnCount, sessionCount, lastCaptureAt, userRecordsCount }, lastExtractionAt] =
     await Promise.all([getTurnStats(config.walletDir), getLastExtractionAt(config.walletDir)])
+  // D2 visibility: fail-open hides slow recalls from the user; the daemon counts
+  // them here so a silent "no memory" streak is diagnosable (see dhakira doctor).
+  const retrieval = getRetrievalMetrics()
   sendJson(res, 200, {
     walletDir: config.walletDir,
     incognito: config.incognito,
@@ -196,6 +200,12 @@ async function handleGetStatus(res: ServerResponse, config: WalletConfig): Promi
     lastCaptureAt,
     userRecordsCount,
     lastExtractionAt,
+    recallCount: retrieval.recallCount,
+    recallTimeouts: retrieval.recallTimeouts,
+    lastRecallTimeoutAt: retrieval.lastRecallTimeoutAt,
+    lastRecallMs: retrieval.lastRecallMs,
+    maxRecallMs: retrieval.maxRecallMs,
+    modelsResident: config.retrieval.modelsResident,
   })
 }
 

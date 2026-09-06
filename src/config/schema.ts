@@ -38,6 +38,19 @@ export interface WalletConfig {
     consolidate?: boolean
   }
 
+  retrieval: {
+    /**
+     * Keep QMD's search models (query-expansion ~1.1 GB, embedding ~0.3 GB,
+     * reranker ~0.6 GB — roughly 2 GB of RAM while resident) loaded for the
+     * daemon's lifetime instead of QMD's default "dispose after 5 min idle".
+     * Default true: the first recall after any pause otherwise reloads all three
+     * inside the hook's 1.5 s budget and the user silently gets no memory (D2).
+     * Set false on RAM-constrained machines; the 900 ms daemon deadline still
+     * guarantees a BM25 answer inside the budget.
+     */
+    modelsResident: boolean
+  }
+
   injection: {
     /** Hard ceiling for the ENTIRE injection block — all three layers SHARE this. */
     maxTokens: number
