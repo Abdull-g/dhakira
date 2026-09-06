@@ -243,7 +243,7 @@ describe('POST /api/ingest — handler', () => {
   async function postRaw(rawBody: string): Promise<{ status: number; body: unknown }> {
     const response = await fetch(`${baseUrl}/api/ingest`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Dhakira-Client': 'hook' },
       body: rawBody,
     })
     return { status: response.status, body: await response.json() }

@@ -67,10 +67,15 @@ async function startApi(): Promise<void> {
   baseUrl = `http://127.0.0.1:${address.port}`
 }
 
-async function request(method: string, path: string, body?: unknown) {
+async function request(
+  method: string,
+  path: string,
+  body?: unknown,
+  headers: Record<string, string> = { 'X-Dhakira-Client': 'dashboard' },
+) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   return {
@@ -197,6 +202,77 @@ describe('dashboard API', () => {
     const response = await request('PUT', '/api/profile', { content: 'nope' })
 
     expect(response.status).toBe(404)
+  })
+
+  // v0.3.1 — audit D8: localhost CSRF. A page in the user's browser can fire a
+  // "simple" cross-origin POST at 127.0.0.1:4101 and plant memories, toggle
+  // incognito off, or trigger extraction. Both checks must hold.
+  describe('mutation guard (D8)', () => {
+    it('rejects a POST carrying a foreign Origin, even with a client header', async () => {
+      const response = await request(
+        'POST',
+        '/api/record',
+        { content: 'planted memory' },
+        { Origin: 'https://evil.example', 'X-Dhakira-Client': 'dashboard' },
+      )
+      expect(response.status).toBe(403)
+      expect(response.body.error).toMatch(/cross-origin/)
+      expect(recordTurnMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects a headerless POST (what a cross-origin text/plain form or fetch produces)', async () => {
+      const response = await request('POST', '/api/incognito', { enabled: false }, {})
+      expect(response.status).toBe(403)
+      expect(response.body.error).toMatch(/X-Dhakira-Client/)
+    })
+
+    it('rejects an unknown client label', async () => {
+      const response = await request(
+        'POST',
+        '/api/record',
+        { content: 'x' },
+        { 'X-Dhakira-Client': 'browser-extension' },
+      )
+      expect(response.status).toBe(403)
+      expect(recordTurnMock).not.toHaveBeenCalled()
+    })
+
+    it.each(['hook', 'cli', 'dashboard'])('allows a trusted local client: %s', async (client) => {
+      const response = await request(
+        'POST',
+        '/api/record',
+        { content: 'I prefer TypeScript' },
+        { 'X-Dhakira-Client': client },
+      )
+      expect(response.status).toBe(200)
+    })
+
+    it("allows the dashboard's own same-origin POST (Origin === host)", async () => {
+      const response = await request(
+        'POST',
+        '/api/record',
+        { content: 'I prefer TypeScript' },
+        { Origin: baseUrl, 'X-Dhakira-Client': 'dashboard' },
+      )
+      expect(response.status).toBe(200)
+    })
+
+    it('leaves read-only GET routes open (no header needed)', async () => {
+      const response = await request('GET', '/api/status', undefined, {})
+      expect(response.status).toBe(200)
+    })
+
+    it('guards every mutating route, not just /api/record', async () => {
+      for (const [path, body] of [
+        ['/api/ingest', { messages: [], tool: 'x' }],
+        ['/api/recall', { query: 'q' }],
+        ['/api/extract', undefined],
+        ['/api/incognito', { enabled: true }],
+      ] as const) {
+        const response = await request('POST', path, body, {})
+        expect(response.status, path).toBe(403)
+      }
+    })
   })
 
   it('GET /api/status surfaces recall latency + timeout counters (D2 visibility)', async () => {

@@ -18,6 +18,13 @@ export interface RedactResult {
  * - Patterns are applied in order; later patterns act on the already-cleaned text.
  */
 const SECRET_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
+  // PEM private-key blocks (RSA/EC/OPENSSH/PGP/…) — whole block, applied FIRST so
+  // the base64 body never leaks through a later, narrower pattern.
+  {
+    name: 'pem-private-key',
+    pattern:
+      /(-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----)/g,
+  },
   // OpenAI-style keys: sk-..., sk-proj-...
   {
     name: 'openai-key',
@@ -64,16 +71,57 @@ const SECRET_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
     name: 'bearer-token',
     pattern: /\bBearer\s+([A-Za-z0-9_\-.+/]{20,})\b/gi,
   },
-  // Inline password assignments: password is X, my password: X, password = X
+  // Inline password assignments: password is X, my password: X, password = X, and
+  // (v0.3.1) JSON/YAML-quoted keys: "password": "X", 'passwd': 'X'.
   {
     name: 'inline-password',
     pattern:
-      /(?:password\s+is\s+|my\s+password[:\s]\s*|password\s*[=:]\s*)["']?([^\s"',;]{8,})["']?/gi,
+      /(?:password\s+is\s+|my\s+password[:\s]\s*|["']?passw(?:or)?d["']?\s*[=:]\s*)["']?([^\s"',;]{8,})["']?/gi,
   },
   // token: <value> or token = <value>
   {
     name: 'token-label',
     pattern: /\btoken\s*[=:]\s*["']?([A-Za-z0-9_\-.+/]{20,})["']?/gi,
+  },
+
+  // ---- v0.3.1 additions (audit D5) ------------------------------------------
+  // Slack tokens: xoxb- (bot), xoxa- (app), xoxp- (user), xoxr- (refresh), xoxs- (session)
+  {
+    name: 'slack-token',
+    pattern: /\b(xox[abprs]-[A-Za-z0-9-]{10,})\b/g,
+  },
+  // Stripe secret / restricted keys (live and test — a leaked test key is still a credential)
+  {
+    name: 'stripe-key',
+    pattern: /\b((?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,})\b/g,
+  },
+  // Google API keys
+  {
+    name: 'google-api-key',
+    pattern: /\b(AIza[0-9A-Za-z_-]{35})\b/g,
+  },
+  // Credentials embedded in URLs: scheme://user:pass@host (postgres://, redis://, https://…).
+  // The user part may be empty (redis://:password@host).
+  {
+    name: 'url-userinfo',
+    pattern: /\b[a-z][a-z0-9+.-]*:\/\/([^\s/@:]*:[^\s/@]+)@/gi,
+  },
+  // HTTP Basic auth header value (label-anchored so prose like "Basic Configuration" is safe)
+  {
+    name: 'basic-auth',
+    pattern: /\bAuthorization\s*:\s*Basic\s+([A-Za-z0-9+/=]{8,})/gi,
+  },
+  // Env-style assignments whose NAME says it's a secret and whose value is ≥ 20 chars:
+  // OPENAI_API_KEY=…, DB_PASSWORD=…, export GITHUB_TOKEN="…"
+  {
+    name: 'env-secret',
+    pattern:
+      /\b[A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?)[A-Z0-9_]*\s*=\s*["']?([^\s"']{20,})["']?/g,
+  },
+  // Email addresses (PII)
+  {
+    name: 'email',
+    pattern: /\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g,
   },
 ]
 

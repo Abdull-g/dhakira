@@ -72,6 +72,22 @@ describe('recordTurn', () => {
     expect(body).toContain('turnIndex: 0')
   })
 
+  it('recordTurn redacts secrets before writing (audit D5 — this path used to bypass redaction)', async () => {
+    const result = await recordTurn(
+      walletDir,
+      'my openai key is sk-aaaaaaaaaaaaaaaaaaaaaaaa and mail me at me@example.com',
+      { store: makeStore() },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.value.userContent).toBe('my openai key is [REDACTED] and mail me at [REDACTED]')
+    const body = await readFile(buildTurnFilePath(walletDir, result.value), 'utf8')
+    expect(body).not.toContain('sk-aaaaaaaaaaaaaaaaaaaaaaaa')
+    expect(body).not.toContain('me@example.com')
+    expect(body).toContain('[REDACTED]')
+  })
+
   it('recordTurn increments turnIndex on subsequent calls', async () => {
     const store = makeStore()
     const results = [

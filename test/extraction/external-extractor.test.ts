@@ -7,7 +7,7 @@ vi.mock('node:http', () => ({ request: vi.fn() }))
 
 const httpsMock = await import('node:https')
 
-import { ExternalLLMExtractor } from '../../src/extraction/external-extractor.ts'
+import { ExternalLLMExtractor, redactMessages } from '../../src/extraction/external-extractor.ts'
 
 function mockHttpsRequest(body: string): {
   write: ReturnType<typeof vi.fn>
@@ -82,5 +82,48 @@ describe('ExternalLLMExtractor', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.value.choices?.[0]?.message?.content).toBe('profile text')
+  })
+
+  // v0.3.1 — audit D4: the raw archive is unredacted by design, so THIS is the
+  // privacy boundary — nothing matching a secret pattern may leave the machine.
+  it('redacts secrets from every message immediately before the external request', async () => {
+    const mockReq = mockHttpsRequest(openAIResponse('{"facts":[]}'))
+    const extractor = new ExternalLLMExtractor({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'test-key',
+      model: 'gpt-4o-mini',
+    })
+
+    const skKey = `sk-${'a'.repeat(24)}`
+    const dbPass = 's3cretPassw0rd'
+    const ghp = `ghp_${'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkABCD'}`
+    const conversation = [
+      '## User',
+      `Deploy with OPENAI_API_KEY=${skKey} and the db is`,
+      `postgres://admin:${dbPass}@db.internal/app; email me at me@example.com`,
+      '## Assistant',
+      `Done. Also noting ${ghp}… for the release.`,
+    ].join('\n')
+
+    await extractor.extract([
+      { role: 'system', content: 'You extract facts.' },
+      { role: 'user', content: conversation },
+    ])
+
+    const [body] = mockReq.write.mock.calls[0] as [string]
+    expect(body).not.toContain(skKey)
+    expect(body).not.toContain(dbPass)
+    expect(body).not.toContain('me@example.com')
+    expect(body).not.toContain(ghp)
+    expect(body).toContain('[REDACTED]')
+    // Non-secret content and the system prompt pass through unchanged.
+    expect(body).toContain('You extract facts.')
+    expect(body).toContain('for the release.')
+  })
+
+  it('redactMessages leaves clean messages untouched (same object) and never throws', () => {
+    const clean = [{ role: 'user' as const, content: 'I prefer PostgreSQL over MySQL.' }]
+    expect(redactMessages(clean)[0]).toBe(clean[0])
+    expect(redactMessages([])).toEqual([])
   })
 })

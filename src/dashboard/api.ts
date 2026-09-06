@@ -455,6 +455,14 @@ async function handleRecall(
     return
   }
 
+  // Honor incognito on the INJECT side too (v0.3.1, audit D3). "Incognito" means
+  // Dhakira is out of the loop entirely — no capture AND no injection — exactly as
+  // the proxy path behaves. Before this, hooks still injected memory in incognito.
+  if (deps.config.incognito) {
+    sendJson(res, 200, { text: null, turnCount: 0, projectId: 'global', reason: 'incognito' })
+    return
+  }
+
   const projectId = await resolveIngestProjectId({
     projectId: typeof body.projectId === 'string' ? body.projectId : undefined,
     cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
@@ -466,6 +474,48 @@ async function handleRecall(
     turnCount: result.turnCount,
     projectId: result.projectId,
   })
+}
+
+// ---------------------------------------------------------------------------
+// Mutation guard (v0.3.1, audit D8 — localhost CSRF / drive-by memory poisoning)
+// ---------------------------------------------------------------------------
+
+/** Clients allowed to mutate the wallet. Hooks, the CLI and the dashboard's own JS. */
+export const DHAKIRA_CLIENT_HEADER = 'x-dhakira-client'
+const ALLOWED_CLIENTS = new Set(['hook', 'cli', 'dashboard'])
+
+/**
+ * The daemon binds 127.0.0.1, but ANY web page the user visits can fire a
+ * "simple" cross-origin POST (text/plain, no preflight) at
+ * http://127.0.0.1:4101/api/record|ingest|incognito|extract. The response is
+ * opaque to the attacker but the side effect lands: planted memories that get
+ * injected into the user's future prompts, incognito switched off, or an
+ * external-LLM extraction run. Two independent checks, both must pass:
+ *
+ *   1. Origin: a browser sets it on cross-origin POSTs. If present, it must be
+ *      the dashboard's own origin (same host:port the request was addressed to).
+ *   2. X-Dhakira-Client: must be hook | cli | dashboard. Browsers cannot attach
+ *      a custom header cross-origin without a CORS preflight, which this server
+ *      never answers — so a headerless or foreign request fails closed.
+ *
+ * GET routes are read-only and unaffected.
+ */
+export function mutationGuard(req: IncomingMessage): { status: number; error: string } | null {
+  const origin = req.headers.origin
+  if (typeof origin === 'string' && origin.length > 0) {
+    const host = req.headers.host ?? ''
+    const own = new Set([`http://${host}`, `https://${host}`])
+    if (!own.has(origin)) {
+      return { status: 403, error: 'forbidden: cross-origin request' }
+    }
+  }
+
+  const clientHeader = req.headers[DHAKIRA_CLIENT_HEADER]
+  const client = Array.isArray(clientHeader) ? clientHeader[0] : clientHeader
+  if (typeof client !== 'string' || !ALLOWED_CLIENTS.has(client.trim().toLowerCase())) {
+    return { status: 403, error: 'forbidden: missing or unknown X-Dhakira-Client header' }
+  }
+  return null
 }
 
 export interface ApiDeps {
@@ -502,6 +552,20 @@ export function createApiHandler(
     const url = (req.url ?? '/').split('?')[0] ?? '/'
     const method = req.method ?? 'GET'
     const key = `${method} ${url}`
+
+    // Every mutating route is a POST; reads stay open (D8).
+    if (method !== 'GET' && method !== 'HEAD') {
+      const denied = mutationGuard(req)
+      if (denied) {
+        log.warn('Rejected mutating request', {
+          route: key,
+          origin: req.headers.origin ?? null,
+          reason: denied.error,
+        })
+        sendJson(res, denied.status, { ok: false, error: denied.error })
+        return
+      }
+    }
 
     const staticRoute = routes.get(key)
     if (staticRoute) return staticRoute(req, res)

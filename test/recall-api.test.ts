@@ -16,13 +16,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { SearchResult as QMDSearchResult, QMDStore } from '@tobilu/qmd'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { WalletConfig } from '../src/config/schema.ts'
 import { createApiHandler } from '../src/dashboard/api.ts'
 import { resolveIngestProjectId } from '../src/ingest.ts'
 
-function makeConfig(walletDir: string): WalletConfig {
+function makeConfig(walletDir: string, incognito = false): WalletConfig {
   return {
     walletDir,
     proxy: { port: 0, host: '127.0.0.1' },
@@ -37,14 +37,15 @@ function makeConfig(walletDir: string): WalletConfig {
     },
     retrieval: { modelsResident: true },
     injection: { maxTokens: 1800, minRelevanceScore: 0.3, recencyBoost: 0.3, maxTurns: 8 },
-    incognito: false,
+    incognito,
   }
 }
 
 /** Mock store: search() undefined → searchTurns falls back to searchLex (no model). */
 function makeMockStore(results: QMDSearchResult[]): QMDStore {
   return {
-    searchLex: async () => results,
+    search: vi.fn().mockRejectedValue(new Error('no models in tests')),
+    searchLex: vi.fn().mockResolvedValue(results),
   } as unknown as QMDStore
 }
 
@@ -71,7 +72,7 @@ describe('POST /api/recall — handler', () => {
   async function postRecall(rawBody: string): Promise<{ status: number; body: unknown }> {
     const response = await fetch(`${baseUrl}/api/recall`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Dhakira-Client': 'hook' },
       body: rawBody,
     })
     return { status: response.status, body: await response.json() }
@@ -85,6 +86,18 @@ describe('POST /api/recall — handler', () => {
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
     await rm(walletDir, { recursive: true, force: true })
+  })
+
+  it('incognito → 200 with null text and reason "incognito"; recall engine is NOT consulted (D3)', async () => {
+    await startApi(makeConfig(walletDir, true))
+    const { status, body } = await postRecall(
+      JSON.stringify({ query: 'what is the retry policy?', tool: 'claude-code' }),
+    )
+    expect(status).toBe(200)
+    expect(body).toEqual({ text: null, turnCount: 0, projectId: 'global', reason: 'incognito' })
+    // The store was never searched — incognito means Dhakira is fully out of the loop.
+    expect(store.search).not.toHaveBeenCalled()
+    expect(store.searchLex).not.toHaveBeenCalled()
   })
 
   it('valid query → 200 with { text, turnCount, projectId } shape (no matches → null text)', async () => {

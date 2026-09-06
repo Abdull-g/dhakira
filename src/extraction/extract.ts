@@ -77,14 +77,23 @@ export function resolveApiKey(apiKey: string): string {
 }
 
 /**
+ * Hard ceiling on one external LLM request (v0.3.1, audit D4). Without it a
+ * stalled provider could hang an extraction run forever (the trigger lock would
+ * then block every later run). 60 s is generous for a single chat completion.
+ */
+export const LLM_REQUEST_TIMEOUT_MS = 60_000
+
+/**
  * Make a raw HTTP(S) POST to an OpenAI-compatible /chat/completions endpoint.
- * Chooses node:https or node:http based on the URL protocol.
+ * Chooses node:https or node:http based on the URL protocol. Aborts after
+ * `timeoutMs` (default LLM_REQUEST_TIMEOUT_MS) and resolves ok:false.
  */
 export async function callLLM(
   baseUrl: string,
   apiKey: string,
   model: string,
   messages: LLMMessage[],
+  timeoutMs: number = LLM_REQUEST_TIMEOUT_MS,
 ): Promise<Result<OpenAIResponse>> {
   const resolvedKey = resolveApiKey(apiKey)
   const anthropic = isAnthropicUrl(baseUrl)
@@ -147,6 +156,9 @@ export async function callLLM(
       {
         method: 'POST',
         headers,
+        // Whole-request deadline: connect + headers + body. A fired timer surfaces
+        // as an 'error' event (AbortError) → ok:false, same path as a network error.
+        signal: AbortSignal.timeout(timeoutMs),
       },
       (res) => {
         const chunks: Buffer[] = []
@@ -167,7 +179,13 @@ export async function callLLM(
       },
     )
 
-    req.on('error', (err: Error) => resolve({ ok: false, error: err }))
+    req.on('error', (err: Error) => {
+      const timedOut = err.name === 'AbortError' || err.name === 'TimeoutError'
+      resolve({
+        ok: false,
+        error: timedOut ? new Error(`LLM request timed out after ${timeoutMs} ms`) : err,
+      })
+    })
     req.write(body)
     req.end()
   })

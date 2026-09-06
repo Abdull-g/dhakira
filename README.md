@@ -486,7 +486,7 @@ It's just files. Back them up. Sync them. Move them to another machine. Grep the
 - A generated profile (`profile.md`)
 
 **What Dhakira doesn't do:**
-- Send your memory anywhere. Storage, search, extraction, and profile synthesis are all local. On the hook path, the only network traffic is your tool talking to its own provider — Dhakira isn't in that path at all. On the proxy path, Dhakira forwards your request to the provider you configured. Nothing else leaves.
+- Send your memory anywhere. Storage, search, extraction, and profile synthesis are all local **unless you configure an external extractor** (`extraction.apiKey`). If you do, extraction sends conversation text to that provider — and secrets are redacted before anything leaves your machine (same regex pass as turns, applied to every message immediately before the request). On the hook path, the only other network traffic is your tool talking to its own provider — Dhakira isn't in that path at all. On the proxy path, Dhakira forwards your request to the provider you configured. Nothing else leaves.
 - Phone home. No telemetry, no analytics, no update checks.
 - Store your API keys in config. Keys use `env:` references.
 - Write memory anywhere except `~/.dhakira`. Capture paths are constrained to the wallet directory.
@@ -503,9 +503,9 @@ Read it yourself: [`test/store/git-identity.test.ts`](test/store/git-identity.te
 
 ### Secret filtering
 
-Before writing a **turn** to disk, Dhakira runs a regex pass that redacts common API key, password, and token formats (11 patterns covering OpenAI, Anthropic, GitHub, Slack, AWS, JWT, generic bearer tokens, and others). Matches become `[REDACTED]`. Turns are what retrieval searches and what gets injected into future prompts, so this is the path that matters for re-transmission.
+Before writing a **turn** to disk, Dhakira runs a regex pass that redacts common API key, password, and token formats — 19 patterns covering OpenAI, Anthropic, GitHub, AWS, Slack (`xox*`), Stripe, Google, JWTs, Bearer and Basic auth headers, PEM private-key blocks, credentials embedded in URLs (`postgres://user:pass@…`), `*_KEY=` / `*_SECRET=` / `*_TOKEN=` style assignments, inline and JSON-quoted passwords, and email addresses. Matches become `[REDACTED]`. The same pass runs on `dhakira record` input and on every message sent to an external extractor. Turns are what retrieval searches and what gets injected into future prompts, so this is the path that matters for re-transmission.
 
-**Conversation archives are not redacted.** `~/.dhakira/conversations/` holds the verbatim exchange, because extraction and consolidation need the unmodified text to work from. If you paste a secret into a conversation, it exists in that archive in plain text on your disk.
+**Conversation archives are not redacted.** `~/.dhakira/conversations/` holds the verbatim exchange, because extraction and consolidation need the unmodified text to work from — it is the mine that future re-synthesis draws on, and it never leaves your disk unredacted. If you paste a secret into a conversation, it exists in that archive in plain text on your disk.
 
 So be precise about what this buys you: redaction stops a secret you pasted once from being *injected back* into a future conversation and re-sent to a model. It is not a guarantee that no secret is ever written to your disk. It's defense in depth, not a security boundary.
 

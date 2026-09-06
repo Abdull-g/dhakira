@@ -132,7 +132,10 @@ async function postJson(
   try {
     const response = await options.fetchImpl(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // X-Dhakira-Client identifies a trusted local client to the daemon's mutation
+      // guard (D8): browsers cannot send this header cross-origin without a CORS
+      // preflight the daemon never answers, so drive-by pages fail closed.
+      headers: { 'Content-Type': 'application/json', 'X-Dhakira-Client': 'hook' },
       body: JSON.stringify(payload),
       signal: controller.signal,
     })

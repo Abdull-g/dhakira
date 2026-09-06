@@ -16,7 +16,11 @@ const state = {
 // ─── API ─────────────────────────────────────────────────────────────────────
 
 async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } }
+  // X-Dhakira-Client: the daemon rejects mutating requests without it (CSRF guard).
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Dhakira-Client': 'dashboard' },
+  }
   if (body !== undefined) opts.body = JSON.stringify(body)
   const res = await fetch(path, opts)
   const data = await res.json()

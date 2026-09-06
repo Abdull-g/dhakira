@@ -8,6 +8,7 @@ import { indexTurnPair } from '../retrieval/indexer.js'
 import { createWalletStore } from '../retrieval/store.js'
 import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
+import { redactSecrets } from './secrets.js'
 import { type TurnPair, writeTurnPairWithContent } from './turns.js'
 
 type Result<T> = import('../proxy/types.js').Result<T>
@@ -24,9 +25,11 @@ export interface RecordTurnOptions {
 /**
  * Record a user-supplied fact as a single turn pair.
  *
- * The content is trimmed but otherwise preserved, written through the standard
- * turn-pair writer, then registered in the turns index. Indexing failures are
- * intentionally non-fatal because the markdown file is already durable on disk.
+ * The content is trimmed and passed through the same secret redaction as every
+ * captured turn (v0.3.1, audit D5 — `dhakira record` used to bypass it), written
+ * through the standard turn-pair writer, then registered in the turns index.
+ * Indexing failures are intentionally non-fatal because the markdown file is
+ * already durable on disk.
  */
 export async function recordTurn(
   walletDir: string,
@@ -43,7 +46,7 @@ export async function recordTurn(
 
   const turnPair: TurnPair = {
     id: generateId('turn'),
-    userContent: userInput.trim(),
+    userContent: redactSecrets(userInput.trim()).cleaned,
     assistantContent: '',
     timestamp: new Date().toISOString(),
     tool: TOOL,
