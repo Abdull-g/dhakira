@@ -55,7 +55,7 @@ An honest map of the project. Everything in the first table is shipped and teste
 | Salience scoring | Rates each memory core / standard / trivia at extraction time |
 | Two-tier store | Durable memories stay; low-value ones carry an expiry |
 | Consolidation | Off-line sweep that merges redundant memories into denser ones |
-| Forget lifecycle | Expired and superseded memories retire, reversibly, after a grace period |
+| Forget lifecycle | Runs automatically (daemon start + after each extraction). Trivia retires at 30 days; core and standard facts leave only when superseded, after a grace period. Reversible. |
 | Project scoping | Detects which repo you're in and scopes memory to it, across tools |
 | Hybrid retrieval | BM25 + embeddings + reranking, scored on relevance, salience, recency, project |
 | Profile synthesis | A generated "About You" that evolves as you work |
@@ -262,6 +262,7 @@ dhakira profile      Show your generated memory profile
 dhakira extract      Regenerate your profile from captured conversations
 dhakira consolidate  Distill redundant memories into denser ones
 dhakira forget       Retire expired and aged-superseded memories
+dhakira doctor       Measure recall latency against the 1.5s hook budget
 dhakira reset        Delete your wallet and start fresh
 ```
 
@@ -347,6 +348,27 @@ $ dhakira status
   Size:     3.2 MB
   Last:     2 minutes ago
 ```
+
+### Doctor
+
+Hooks fail open, which means a slow daemon never shows up as an error — it shows up as Claude simply not remembering. `dhakira doctor` makes that measurable: it runs one representative recall and reports the latency against the 1.5 s hook budget with an explicit verdict.
+
+```
+$ dhakira doctor
+
+  dhakira doctor
+  ━━━━━━━━━━━━━━
+  Daemon:      running (127.0.0.1:4101)
+  Models:      downloaded
+  Resident:    yes (retrieval.modelsResident)
+  Recall path: daemon /api/recall (hybrid, what a hook sees)
+  Recall time: 412 ms (budget 1500 ms · daemon deadline 900 ms)
+  Turns found: 5
+  Timeouts:    0 of 38 recalls served by BM25 since daemon start
+  Verdict:     PASS — recall answers inside the hook budget
+```
+
+When the daemon is running the measurement goes through `/api/recall`, exactly like a hook. When it is stopped, `doctor` measures in-process — and if the search models are not on disk yet it measures keyword search only rather than trigger a ~2 GB download. A WARN always comes with the reason and what to do about it. No network calls beyond your own loopback daemon.
 
 ### Verbose mode
 
@@ -587,7 +609,7 @@ Three local models: query expansion (~1.28 GB), embeddings (~333 MB), reranker (
 No — it's generated from your history and would be overwritten on the next refresh. To teach Dhakira something specific, use `dhakira record "..."`. Recorded facts are real memories that flow into the profile naturally.
 
 **What's the difference between a turn and a memory?**
-A turn is a captured exchange, stored as-is. A memory is a fact extracted from turns, scored for importance, and subject to consolidation and forgetting. Retrieval searches turns; your profile is built from memories.
+A turn is a captured exchange, stored with secrets redacted and long code blocks collapsed (the verbatim exchange lives in `conversations/`). A memory is a fact extracted from turns, scored for importance, and subject to consolidation and forgetting. Retrieval searches turns; your profile is built from memories.
 
 ## Contributing
 

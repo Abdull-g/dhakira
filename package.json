@@ -1,6 +1,6 @@
 {
   "name": "dhakira",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Portable AI memory you own. Local-first memory engine with native hooks for Claude Code and Codex.",
   "author": "Dhakira",
   "type": "module",

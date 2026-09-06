@@ -4,6 +4,43 @@ All notable changes to Dhakira are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-06
+
+The correctness release. A full engine audit (`memory-wallet-notes/audits/2026-09-engine-audit.md`) found that the hooks-first product had one seam broken end to end — hook captures never reached the memory layer — plus a cold-start latency hole that fail-open turned into silent "no memory", and a cluster of privacy gaps. This release fixes what the audit found, in the order the product owner set. No new delivery paths, no new dependencies.
+
+### Fixed
+- **Hook captures reach Layer 2.** Every hook capture is exactly one user + assistant exchange, and the session reconstructor dropped anything under three messages — so extraction, salience, consolidation, forget, `profile.md` and project docs never ran for a wallet fed only by Claude Code / Codex hooks. Hook archives are now grouped into synthetic sessions by tool, project and the tool's own `session_id` (forwarded from the hook payload and persisted on the archive; calendar day when a tool sends none), the gate applies to the group, and long-lived sessions are extracted incrementally. Locked by `test/integration/hook-to-extraction.test.ts`, which drives the real ingest → extraction path with only the models mocked.
+- **Cold-start recall answers inside the hook budget.** QMD unloads its three search models after five idle minutes; the first recall after any pause reloaded them inside the hook's 1.5 s budget, the hook aborted, and you got no memory on that prompt. Models are now kept resident (`retrieval.modelsResident`, default `true`, ~2 GB RAM, documented), and the daemon races hybrid search against a 900 ms deadline — on a miss it serves BM25 keyword results immediately and lets hybrid finish in the background to warm the models. The hook budget itself is unchanged.
+- **Empty-but-successful hybrid results fall back to BM25** (`retrieval/loader.ts`) — the fallback previously fired only when hybrid threw.
+- **Incognito now covers recall as well as capture.** Hooks were still injecting memory in incognito; `POST /api/recall` returns nothing with `reason: "incognito"` before touching the store.
+- **Secrets are redacted before anything leaves the machine.** The external extractor (opt-in via `extraction.apiKey`) passes every message through the redaction pass immediately before the request; the raw archive stays verbatim by design. External LLM calls now time out after 60 s instead of hanging an extraction run.
+- **Redaction covers what the audit could bypass.** Eight new patterns — PEM private-key blocks, Slack `xox*` tokens, Stripe `sk_/rk_live|test_`, Google `AIza` keys, credentials embedded in URLs, `Authorization: Basic`, `*_KEY=` / `*_SECRET=` / `*_TOKEN=` / `*_PASSWORD=` assignments, and email addresses — plus JSON/YAML-quoted passwords. `dhakira record` runs the same pass (it used to store input verbatim). README previously claimed Slack coverage that did not exist; it exists now.
+- **Cross-origin memory poisoning closed.** The daemon binds localhost, but any web page could fire a simple POST at `127.0.0.1:4101` and plant memories, switch incognito off, or trigger an extraction run. Mutating routes now reject a foreign `Origin` and require an `X-Dhakira-Client` header (hooks, CLI and the dashboard send it; browsers cannot attach it cross-origin without a preflight the daemon never answers). Read-only GET routes are unchanged.
+- **`scopeMode: 'only'` is real project isolation** — it was accepted and silently behaved as `'boost'`. Same-project turns are kept (still 1.5×), `global` turns are kept, other projects are dropped.
+- **One `minScore`, one scale.** BM25 fallback scores (unbounded) are normalized by the top hit before the threshold, so `0.3` means "at least 30 % of the best keyword match" on that path instead of "everything passes".
+- **Explicit project ids are canonical on every path.** A tag sent by a hook was stored raw while the proxy header path stored `explicit:<slug>`, splitting one project into two scopes. Both now go through the same resolver; already-canonical ids (`git:…`, `folder:…`, `explicit:…`) pass through untouched.
+- **Injection no longer starves on one oversized turn.** An entry that does not fit is skipped instead of ending the fill, and the user side of each injected entry is capped at ~300 characters.
+- **Standing Order #7 violations in the engine root.** `computeContextFingerprint` moved to `src/store/`; `recall.ts` no longer types its resolver seam against the proxy's request shape. The architecture test now guards every engine directory and the root verbs, not just four directories.
+- **Diagnostics are bounded.** The quality-gate rejection log is a 500-entry ring buffer; the auto-extraction capture counter is persisted, so restarting the daemon no longer resets the countdown to the next extraction.
+- Proxy-era text: the systemd unit description, the `init` wizard (hooks lead; API keys are offered only for the optional external extractor; the base-URL proxy is an explicit opt-in) and help text.
+
+### Changed
+- **Memory tiers, locked:** raw captures **permanent** · `core` facts **permanent** · `standard` facts **supersession-only** · `trivia` **30 days**. The 180-day age expiry for `standard` facts is gone. **Migration:** `standard` memories written by v0.3.0 carry an `expiresAt` stamp ~180 days after creation; those stamps are now ignored on read and by the forget sweep (`isAgeExpired` is false for any tier without a TTL), so nobody's facts die at +180 days under the new policy. No files are rewritten.
+- **Forget runs on its own** — once at daemon start and at the end of every extraction run — and expiry is enforced on read: profile synthesis, project-doc collection and consolidation all skip an age-expired fact before the sweep reaches it. `dhakira forget` still works as a manual sweep.
+- **Reasoning over code is now a pipeline stage, not a prompt aspiration.** In stored turns (`turns/`), fenced code blocks longer than 10 lines become `[code block: <lang>, N lines]` and runs of repeated output collapse; short snippets are kept. The raw archive (`conversations/`) is untouched — it is the mine future extraction re-synthesizes from. The extraction prompt now extracts decisions, rejected alternatives, conventions and gotchas the assistant stated and the user accepted (it used to forbid reading assistant text at all), while still never extracting code itself.
+- Classifier taxonomy: `error_response` is skipped on both the rule and heuristic paths; the never-produced `pre_flight` category is gone.
+- `@tobilu/qmd` is pinned to exactly `2.0.1`; the consolidation threshold and the ranker floor are calibrated to that version and say so in code.
+
+### Added
+- **`dhakira doctor`** — measures one representative recall against the 1.5 s hook budget and prints an explicit PASS / WARN with reasons. Uses the running daemon when there is one (what a hook actually experiences); otherwise measures in-process, and never triggers a model download (BM25-only when the models are not on disk).
+- `GET /api/status` reports `recallCount`, `recallTimeouts`, `lastRecallTimeoutAt`, `lastRecallMs`, `maxRecallMs` and `modelsResident`, so a silent "no memory" streak is diagnosable.
+- `retrieval.modelsResident` config key (see README → Configuration).
+- Root `CLAUDE.md` pointer to the standing orders for contributors.
+
+### Known open
+- Live end-to-end cross-tool recall on remote compute (a real Claude Code session and a real Codex session sharing one wallet) has **not** been exercised by this release — it remains the open manual gate.
+- `turns/` (the injected layer) still has no retention policy; see the v0.4 candidates in the completion report.
+
 ## [0.3.0] - 2026-08-17
 
 The hooks release. Dhakira no longer needs to sit in front of your model as a proxy. `dhakira connect claude-code` and `dhakira connect codex` register native lifecycle hooks, so your tool talks to its own provider exactly as before and Dhakira captures and recalls alongside it. Memory now also carries a project axis, a salience tier, and a lifecycle — it consolidates duplicates and lets go of what stopped mattering, instead of growing forever.
