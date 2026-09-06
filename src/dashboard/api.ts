@@ -392,6 +392,7 @@ async function handleIngest(
     model: typeof body.model === 'string' ? body.model : undefined,
     projectId: typeof body.projectId === 'string' ? body.projectId : undefined,
     cwd: typeof body.cwd === 'string' ? body.cwd : undefined,
+    sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
   })
   sendJson(res, 200, result)
 }

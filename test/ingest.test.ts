@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { WalletConfig } from '../src/config/schema.ts'
 import { createApiHandler } from '../src/dashboard/api.ts'
 import { cleanSessionContent } from '../src/extraction/session-reconstructor.ts'
-import { ingestTrace } from '../src/ingest.ts'
+import { ingestTrace, normalizeSessionId } from '../src/ingest.ts'
 import type { NormalizedMessage } from '../src/proxy/types.ts'
 import { createWalletStore } from '../src/retrieval/store.ts'
 
@@ -186,6 +186,36 @@ describe('ingestTrace — generic hygiene chain', () => {
     expect(result.ok).toBe(true)
     expect(result.captured).toBe(false)
     expect(result.reason).toBe('empty_messages')
+  })
+
+  it('persists the hook session_id on the archive frontmatter (D1 grouping key), omitted when absent', async () => {
+    await ingestTrace(
+      { store, config: makeConfig(walletDir) },
+      { messages: realConversation, tool: 'claude-code', sessionId: 'sess-42' },
+    )
+    await ingestTrace(
+      { store, config: makeConfig(walletDir) },
+      { messages: realConversation, tool: 'claude-code' },
+    )
+    const conversations = await readConversations(walletDir)
+    expect(conversations).toHaveLength(2)
+    const withId = conversations.filter((c) => c.includes('sessionId: sess-42'))
+    expect(withId).toHaveLength(1)
+    expect(conversations.filter((c) => /^sessionId:/m.test(c))).toHaveLength(1)
+  })
+
+  it('drops a session_id that could break YAML frontmatter instead of writing it', async () => {
+    await ingestTrace(
+      { store, config: makeConfig(walletDir) },
+      { messages: realConversation, tool: 'claude-code', sessionId: 'evil\nincognito: true' },
+    )
+    const [conversation] = await readConversations(walletDir)
+    expect(conversation).not.toMatch(/^sessionId:/m)
+    expect(conversation).toContain('incognito: false')
+    expect(normalizeSessionId('  ok-id_1.2:3  ')).toBe('ok-id_1.2:3')
+    expect(normalizeSessionId('has space')).toBeUndefined()
+    expect(normalizeSessionId('x'.repeat(129))).toBeUndefined()
+    expect(normalizeSessionId(undefined)).toBeUndefined()
   })
 })
 

@@ -25,4 +25,11 @@ export interface CapturedConversation {
    * (byte-compat with pre-T08 conversations).
    */
   projectId: string
+  /**
+   * v0.3.1 (audit D1): the source tool's own session id, forwarded by hook
+   * adapters (`session_id` in the Claude Code / Codex hook payload). Lets the
+   * session reconstructor group one-turn hook archives into exact sessions.
+   * Persisted to frontmatter only when present (byte-compat otherwise).
+   */
+  sessionId?: string
 }

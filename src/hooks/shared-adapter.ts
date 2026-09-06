@@ -101,11 +101,16 @@ function requestMetadata(
   const metadata: Record<string, string> = {}
   const cwd = pickString(payload, ['cwd'])
   const projectId = pickString(payload, ['projectId', 'project_id'])
+  // `session_id` is a documented common field on EVERY Claude Code and Codex hook
+  // payload (Codex subagent hooks carry the parent session id). The daemon uses it
+  // to group one-turn hook captures into exact sessions for Layer-2 extraction.
+  const sessionId = pickString(payload, ['session_id', 'sessionId'])
   const turnId = definition.includeTurnId ? pickString(payload, ['turn_id', 'turnId']) : ''
   const model = includeModel && definition.includeModel ? pickString(payload, ['model']) : ''
 
   if (cwd.length > 0) metadata.cwd = cwd
   if (projectId.length > 0) metadata.projectId = projectId
+  if (sessionId.length > 0) metadata.sessionId = sessionId
   if (turnId.length > 0) metadata.turnId = turnId
   if (model.length > 0) metadata.model = model
   return metadata

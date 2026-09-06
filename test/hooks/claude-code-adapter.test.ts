@@ -262,6 +262,30 @@ describe('runStop — transcript → ingest', () => {
     )
     expect(outcome.posted).toBe(false)
   })
+
+  it('forwards the hook payload session_id (documented common field) so the daemon can group turns (D1)', async () => {
+    const { fetchImpl, calls } = recordingFetch({ ok: true, json: { ok: true, captured: true } })
+    await runStop(
+      {
+        session_id: 'abc123',
+        transcript_path: '/tmp/session.jsonl',
+        cwd: '/home/me/proj',
+        last_assistant_message: 'answer',
+        hook_event_name: 'Stop',
+      },
+      { fetchImpl, readTranscript: () => TRANSCRIPT },
+    )
+    expect(calls[0]?.body).toMatchObject({ tool: 'claude-code', sessionId: 'abc123' })
+  })
+
+  it('omits sessionId when the payload has none (older payloads keep working)', async () => {
+    const { fetchImpl, calls } = recordingFetch({ ok: true, json: { ok: true, captured: true } })
+    await runStop(
+      { transcript_path: '/tmp/session.jsonl', last_assistant_message: 'answer' },
+      { fetchImpl, readTranscript: () => TRANSCRIPT },
+    )
+    expect(calls[0]?.body).not.toHaveProperty('sessionId')
+  })
 })
 
 describe('handleEvent — stdout dispatch', () => {

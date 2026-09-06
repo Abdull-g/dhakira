@@ -19,6 +19,7 @@ import {
   cleanSessionContent,
   hasSubstantiveContent,
   reconstructSessions,
+  type SessionFile,
 } from './session-reconstructor.js'
 import type { ExtractedFact, MemoryRecord, ScoredFact, UpdateAction } from './types.js'
 import { processUpdates } from './update.js'
@@ -366,16 +367,22 @@ interface ConversationResult {
 
 /** Process a single session file: clean, extract facts, decide actions, write memories */
 async function processConversation(
-  filePath: string,
+  session: SessionFile,
   rollingSummary: string,
   ctx: ConversationContext,
 ): Promise<ConversationResult | null> {
   const logger = createLogger('extraction')
   let rawContent: string
-  try {
-    rawContent = await readFile(filePath, 'utf8')
-  } catch {
-    return null
+  if (session.content !== undefined) {
+    // Synthetic hook session (D1): assembled in memory from several one-turn
+    // archives — there is no single file to read.
+    rawContent = session.content
+  } else {
+    try {
+      rawContent = await readFile(session.filePath, 'utf8')
+    } catch {
+      return null
+    }
   }
 
   const fm = parseConvFrontmatter(rawContent)
@@ -523,8 +530,9 @@ async function processAllConversations(
   // to rebuild (scoped, NOT every bucket).
   const touchedProjectIds = new Set<string>()
 
-  // Reconstruct sessions: 119 files → ~10 session representatives
-  const sessions = await reconstructSessions(walletDir)
+  // Reconstruct sessions: 119 files → ~10 session representatives. Hook turns
+  // already processed are excluded before grouping (D1: incremental sessions).
+  const sessions = await reconstructSessions(walletDir, { processedIds })
 
   // Filter to unprocessed sessions only
   const pending = sessions.filter((s) => !processedIds.has(s.id))
@@ -539,7 +547,8 @@ async function processAllConversations(
 
   // Process one at a time with delay between calls
   for (let i = 0; i < pending.length; i++) {
-    const { filePath, id } = pending[i]
+    const session = pending[i]
+    const { id } = session
 
     // Abort on too many consecutive failures (persistent error like bad API key)
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
@@ -550,18 +559,23 @@ async function processAllConversations(
       break
     }
 
-    const result = await processConversation(filePath, rollingSummary, ctx)
+    const result = await processConversation(session, rollingSummary, ctx)
 
     if (result === null) {
-      // Conversation was skipped (incognito, too few messages, no real content)
-      // Mark as processed — it won't change on re-run
+      // Conversation was skipped (incognito, too few messages, no real content).
+      // Mark the session id as processed — it won't change on re-run. For a
+      // synthetic hook group the id is derived from its members, so the SAME
+      // members are never re-evaluated, while a new turn arriving in that
+      // session forms a new group (new id) and gets a fresh look. The member
+      // ids are deliberately NOT marked here so they can be regrouped.
       processedIds.add(id)
       continue
     }
 
     if (result.succeeded) {
-      // Success — mark as processed, update stats
+      // Success — mark as processed (and every hook member folded in), update stats
       processedIds.add(id)
+      for (const memberId of session.memberIds ?? []) processedIds.add(memberId)
       rollingSummary = result.rollingSummary
       stats.conversationsProcessed++
       mergeStats(stats, result.stats)

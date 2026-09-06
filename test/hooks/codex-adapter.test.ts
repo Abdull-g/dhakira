@@ -211,6 +211,26 @@ describe('Codex Stop', () => {
     )
     expect(outcome).toEqual({ posted: false, reason: 'error' })
   })
+
+  it('forwards session_id alongside turn_id (Codex common field; subagents carry the parent id)', async () => {
+    const { fetchImpl, calls } = recordingFetch({ ok: true, json: { ok: true, captured: true } })
+    await runStop(
+      {
+        session_id: 'codex-sess-9',
+        turn_id: 'turn-5',
+        transcript_path: '/tmp/codex-rollout.jsonl',
+        cwd: '/work/repo',
+        last_assistant_message: 'answer',
+        hook_event_name: 'Stop',
+      },
+      { fetchImpl, readTranscript: () => CODEX_TRANSCRIPT },
+    )
+    expect(calls[0]?.body).toMatchObject({
+      tool: 'codex',
+      sessionId: 'codex-sess-9',
+      turnId: 'turn-5',
+    })
+  })
 })
 
 describe('Codex subagent policy', () => {

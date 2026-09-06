@@ -58,8 +58,25 @@ export interface IngestInput {
   projectId?: string
   /** Local cwd to resolve a projectId from when none is explicit. Local read, NO network. */
   cwd?: string
+  /**
+   * The tool's own session id (hook payload `session_id`). Persisted on the
+   * archive so Layer-2 can group one-turn hook captures into exact sessions (D1).
+   */
+  sessionId?: string
   /** Capture timestamp (defaults to now). */
   timestamp?: Date
+}
+
+/**
+ * Frontmatter-safe session id: the hook payload is trusted local input, but the
+ * value lands on a YAML line, so anything outside a conservative charset (or
+ * over-long) is dropped rather than risk a malformed archive. Returns undefined
+ * when absent or unusable — grouping then falls back to the calendar day.
+ */
+export function normalizeSessionId(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim() ?? ''
+  if (trimmed.length === 0) return undefined
+  return /^[A-Za-z0-9._:-]{1,128}$/.test(trimmed) ? trimmed : undefined
 }
 
 export interface IngestResult {
@@ -188,6 +205,7 @@ export async function ingestTrace(deps: IngestDeps, input: IngestInput): Promise
     tokenEstimate: estimateMessagesTokens(conversationMessages),
     incognito: config.incognito,
     projectId,
+    sessionId: normalizeSessionId(input.sessionId),
   }
   await writeConversation(conversation, walletDir)
 

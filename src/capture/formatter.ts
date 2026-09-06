@@ -48,6 +48,12 @@ function buildFrontmatter(conversation: CapturedConversation): string {
   if (conversation.projectId && conversation.projectId !== 'global') {
     lines.push(`projectId: ${conversation.projectId}`)
   }
+  // Additive (v0.3.1, D1): only EMIT the tool session id when the adapter sent
+  // one, so proxy captures stay byte-identical. The value is validated upstream
+  // (ingest.ts normalizeSessionId) so it can never break the frontmatter.
+  if (conversation.sessionId) {
+    lines.push(`sessionId: ${conversation.sessionId}`)
+  }
   lines.push('---')
   return lines.join('\n')
 }
