@@ -23,6 +23,7 @@ import {
 } from '../extraction/runner.js'
 import type { SalienceTier } from '../salience/types.js'
 import { createLogger } from '../utils/logger.js'
+import { DEFAULT_TIER_POLICY, isAgeExpired, type TierPolicyConfig } from './tier-policy.js'
 
 type Result<T> = import('../proxy/types.js').Result<T>
 
@@ -38,12 +39,15 @@ export interface ForgetPolicy {
    * reversed before its sources are soft-forgotten. The T05→T06 bridge.
    */
   supersededGraceDays: number
+  /** Which tiers age-expire at all (v0.3.1: trivia only). */
+  tiers: TierPolicyConfig
 }
 
 // Constants are the source of truth (T04 precedent — no decorative config block
 // until there's a reader for it).
 export const DEFAULT_FORGET_POLICY: ForgetPolicy = {
   supersededGraceDays: 14,
+  tiers: DEFAULT_TIER_POLICY,
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -60,16 +64,18 @@ export interface ForgetCandidate {
  * Decide whether a memory is forget-eligible, and WHY. Pure: same inputs →
  * same output. Returns the reason so every forget can be logged LOUDLY.
  *
- * Eligibility (CP1, locked):
+ * Eligibility (CP1, locked; tier map re-locked v0.3.1):
  *   - idempotency: already `forgottenAt` → never re-eligible (a 2nd run forgets 0).
  *   - superseded-aged: `invalidatedAt != null && invalidatedAt < now − grace`.
- *   - expired:        `expiresAt != null && expiresAt < now` (the T04 TTL fired).
+ *   - expired:        `expiresAt != null && expiresAt < now` AND the tier has a
+ *                     TTL under the policy (v0.3.1: trivia only — see tier-policy).
  *
  * Hard guards:
- *   - CORE IMMUNITY: a `core`-tier memory is NEVER expiry-eligible — anchored on
- *     `salienceTier === 'core'`, NOT on `expiresAt == null`, so even a core file
- *     with a stray non-null `expiresAt` (data drift) is still protected. Core can
- *     leave ONLY via supersession + grace.
+ *   - TIER IMMUNITY: `core` (always) and `standard` (since v0.3.1, supersession-
+ *     only) are NEVER expiry-eligible — anchored on the tier's policy, NOT on
+ *     `expiresAt == null`, so a core file with a stray non-null `expiresAt` (data
+ *     drift) or a standard file with a legacy 180-day stamp (v0.3.0 policy) is
+ *     still protected. Both can leave ONLY via supersession + grace.
  *   - Pre-T04 backward-compat: a file with no `expiresAt` (→ null) is durable and
  *     is NEVER force-expired (expiry requires `expiresAt != null`).
  *
@@ -100,13 +106,11 @@ export function isForgetEligible(
     return { eligible: false, reason: null }
   }
 
-  // Expired by TTL — load-bearing change. Core is immune by tier, never by the
-  // accident of a null expiry; durable (null expiresAt) files are never expired.
-  if (
-    memory.salienceTier !== 'core' &&
-    memory.expiresAt !== null &&
-    memory.expiresAt.getTime() < now.getTime()
-  ) {
+  // Expired by TTL — load-bearing change. Immunity is anchored on the TIER's
+  // policy, never on the accident of a null expiry: core AND (since v0.3.1)
+  // standard never age-expire, so a legacy 180-day stamp on a standard memory is
+  // inert (the migration), and durable (null expiresAt) files are never expired.
+  if (isAgeExpired(memory.salienceTier, memory.expiresAt, now, policy.tiers)) {
     return { eligible: true, reason: 'expired' }
   }
 

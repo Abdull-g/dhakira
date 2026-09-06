@@ -34,12 +34,17 @@ function record(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
   }
 }
 
-/** Seed the canonical mixed fixture: 2 expired, 1 superseded-aged, 1 superseded-fresh, 1 durable-core, 1 active. */
+/**
+ * Seed the canonical mixed fixture (v0.3.1 tier map):
+ *   legacy_std      standard with a PAST expiresAt (v0.3.0 +180 d stamp) → inert, stays active
+ *   expired_triv    trivia past its 30 d TTL → expired
+ *   superseded_aged / superseded_fresh / durable_core / active_std as before
+ */
 async function seedMixedWallet(walletDir: string): Promise<void> {
   const now = Date.now()
   await writeMemoryFile(
     walletDir,
-    record({ id: 'expired_std', salienceTier: 'standard', expiresAt: new Date(now - 10 * DAY) }),
+    record({ id: 'legacy_std', salienceTier: 'standard', expiresAt: new Date(now - 10 * DAY) }),
   )
   await writeMemoryFile(
     walletDir,
@@ -81,10 +86,11 @@ describe('runForget — stats over a mixed wallet', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
+    // legacy_std is NOT forgotten: standard is supersession-only since v0.3.1.
     expect(result.value).toEqual({
       scanned: 6,
-      forgotten: 3,
-      byReason: { expired: 2, supersededAged: 1 },
+      forgotten: 2,
+      byReason: { expired: 1, supersededAged: 1 },
       skippedCore: 1,
     })
     // Re-indexed exactly once because something changed.
@@ -105,7 +111,7 @@ describe('runForget — stats over a mixed wallet', () => {
     await seedMixedWallet(walletDir)
     const first = makeStore()
     const r1 = await runForget(walletDir, first.store)
-    expect(r1.ok && r1.value.forgotten).toBe(3)
+    expect(r1.ok && r1.value.forgotten).toBe(2)
 
     const second = makeStore()
     const r2 = await runForget(walletDir, second.store)
@@ -130,20 +136,17 @@ describe('runForget — read-path exclusion (loadActiveMemories skips forgotten)
   it('soft-forgotten memories drop out of the active set after a forget run', async () => {
     await seedMixedWallet(walletDir)
 
-    // Before: active set excludes the 2 superseded (invalidatedAt) → 4 active.
+    // Before the sweep: the active set excludes the 2 superseded (invalidatedAt) AND
+    // (v0.3.1, D6) the age-expired trivia — expiry is enforced on read, swept or not.
+    // The legacy standard stamp is inert, so legacy_std stays active.
     const before = await loadActiveMemories(walletDir)
-    expect(before.map((m) => m.id).sort()).toEqual([
-      'active_std',
-      'durable_core',
-      'expired_std',
-      'expired_triv',
-    ])
+    expect(before.map((m) => m.id).sort()).toEqual(['active_std', 'durable_core', 'legacy_std'])
 
     const { store } = makeStore()
     await runForget(walletDir, store)
 
-    // After: the 2 now-forgotten expired memories are also excluded → 2 active.
+    // After: unchanged set — the sweep only stamped what read paths already hid.
     const after = await loadActiveMemories(walletDir)
-    expect(after.map((m) => m.id).sort()).toEqual(['active_std', 'durable_core'])
+    expect(after.map((m) => m.id).sort()).toEqual(['active_std', 'durable_core', 'legacy_std'])
   })
 })

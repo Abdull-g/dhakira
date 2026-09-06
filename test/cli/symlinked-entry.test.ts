@@ -17,7 +17,9 @@ describe('symlinked CLI entrypoint', () => {
     tempDir = await mkdtemp(join(tmpdir(), 'dhakira-cli-'))
     cliSymlink = join(tempDir, 'dhakira')
     await symlink(join(process.cwd(), 'dist/cli.js'), cliSymlink)
-  }, 30_000)
+    // `npm run build` (tsc + asset copy) takes ~15 s alone and can exceed 30 s
+    // when the whole suite runs in parallel — that made this test flaky.
+  }, 120_000)
 
   afterAll(async () => {
     if (tempDir) {

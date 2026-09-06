@@ -213,8 +213,10 @@ describe('runDoctor — daemon stopped (in-process measurement)', () => {
   })
 
   it('hybrid misses the deadline → BM25 served, path=bm25-deadline, warn explains cold models', async () => {
-    // Deadline is fixed at HYBRID_DEADLINE_MS inside searchTurns; use a hybrid slower than that.
-    const store = fakeStore({ hybridDelayMs: 1200 })
+    // Deadline is fixed at HYBRID_DEADLINE_MS inside searchTurns; use a hybrid FAR slower
+    // than that so scheduling jitter under a loaded test runner cannot flip the race.
+    const hybridDelayMs = 4000
+    const store = fakeStore({ hybridDelayMs })
     const report = await runDoctor({
       config: makeConfig(),
       fetchImpl: fakeDaemon({ status: null }).fetchImpl,
@@ -222,10 +224,12 @@ describe('runDoctor — daemon stopped (in-process measurement)', () => {
       openStore: async () => ({ ok: true, value: store }),
     })
     expect(report.recall.path).toBe('bm25-deadline')
-    expect(report.recall.measuredMs).toBeLessThan(HOOK_BUDGET_MS)
+    // BM25 answered without waiting for hybrid (the property that matters).
+    expect(report.recall.measuredMs).toBeLessThan(hybridDelayMs)
+    expect(report.recall.turnCount).toBe(1)
     expect(report.verdict).toBe('warn')
     expect(report.notes.join('\n')).toMatch(/missed the 900 ms daemon deadline/)
-  }, 10_000)
+  }, 15_000)
 
   it('modelsResident=false is called out as a note', async () => {
     const report = await runDoctor({

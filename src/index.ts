@@ -33,6 +33,7 @@ import type { NormalizedMessage, NormalizedRequest } from './proxy/types.js'
 import { recallOnce } from './recall.js'
 import { indexTurnPair, startReconciliation, stopReconciliation } from './retrieval/indexer.js'
 import { createWalletStore } from './retrieval/store.js'
+import { runForget } from './store/forget.js'
 import { readGitIdentity } from './store/git-identity.js'
 import { resolveProjectId, sniffCwd } from './store/project.js'
 import { generateId } from './utils/ids.js'
@@ -501,6 +502,20 @@ export async function main(): Promise<void> {
   const dashboardServer = createDashboardServer(config, store)
 
   const pidFile = join(config.walletDir, '.pid')
+
+  // v0.3.1 (D6): one forget sweep at daemon start — model-free, laptop-safe —
+  // so TTLs fire even on a wallet that never triggers extraction. Non-fatal.
+  runForget(config.walletDir, store)
+    .then((result) => {
+      if (result.ok && result.value.forgotten > 0) {
+        emit(`  Retired ${result.value.forgotten} expired memories.`)
+      } else if (!result.ok) {
+        log.warn('Startup forget sweep failed (non-fatal)', { error: result.error.message })
+      }
+    })
+    .catch((err: unknown) => {
+      log.warn('Startup forget sweep failed (non-fatal)', { error: String(err) })
+    })
 
   // Start background reconciliation: runs initial scan + embed on startup
   // (warms up models and indexes any turns from previous sessions), then

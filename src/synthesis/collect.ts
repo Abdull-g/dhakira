@@ -20,6 +20,7 @@ import { join } from 'node:path'
 import { parse } from 'yaml'
 
 import type { SalienceTier } from '../salience/types.js'
+import { isAgeExpired } from '../store/tier-policy.js'
 
 /** Local Result alias (SO#7: do NOT import from src/proxy/). */
 type Result<T> = { ok: true; value: T } | { ok: false; error: Error }
@@ -57,8 +58,18 @@ interface MemoryFrontmatter {
   confidence: string
   invalidatedAt: string | null | undefined
   forgottenAt: string | null | undefined
+  /** Parsed `expiresAt`; null when absent / literal null / unparseable. */
+  expiresAt: Date | null
   salienceTier: SalienceTier
   projectId: string
+}
+
+function parseDateOrNull(raw: unknown): Date | null {
+  if (raw === null || raw === undefined) return null
+  const text = String(raw)
+  if (text === 'null' || text === '') return null
+  const d = new Date(text)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 /**
@@ -91,6 +102,7 @@ function parseMemoryFrontmatter(content: string): MemoryFrontmatter | null {
           : parsed.forgottenAt
             ? String(parsed.forgottenAt)
             : undefined,
+      expiresAt: parseDateOrNull(parsed.expiresAt),
       salienceTier,
       projectId: parsed.projectId ? String(parsed.projectId) : GLOBAL_PROJECT_ID,
     }
@@ -148,12 +160,15 @@ export function groupMemoriesByProject(memories: EligibleMemory[]): Map<string, 
  * EDGE: read every eligible memory off disk, then group them by project (pure).
  *
  * Eligibility mirrors profile-gen.ts exactly: a `.md` file under memoriesDir that
- * is HIGH-confidence, NOT invalidated, and NOT forgotten, with a non-empty body.
- * Unreadable/malformed files are skipped silently (one bad file never aborts the
- * sweep). The grouping/ordering/cap is the pure groupMemoriesByProject.
+ * is HIGH-confidence, NOT invalidated, NOT forgotten, and (v0.3.1, audit D6) NOT
+ * age-expired — an expired-but-unswept trivia fact no longer feeds synthesis —
+ * with a non-empty body. Unreadable/malformed files are skipped silently (one bad
+ * file never aborts the sweep). The grouping/ordering/cap is the pure
+ * groupMemoriesByProject.
  */
 export async function collectScopedMemories(
   memoriesDir: string,
+  now: Date = new Date(),
 ): Promise<Result<Map<string, string[]>>> {
   let relPaths: string[]
   try {
@@ -169,6 +184,7 @@ export async function collectScopedMemories(
       const content = await readFile(join(memoriesDir, rel), 'utf8')
       const fm = parseMemoryFrontmatter(content)
       if (!fm || fm.confidence !== 'HIGH' || fm.invalidatedAt || fm.forgottenAt) continue
+      if (isAgeExpired(fm.salienceTier, fm.expiresAt, now)) continue
       const body = extractMemoryBody(content)
       if (body) eligible.push({ body, projectId: fm.projectId, tier: fm.salienceTier })
     } catch {

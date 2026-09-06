@@ -485,7 +485,9 @@ describe('searchTurns', () => {
       expect(result.ok).toBe(true)
       if (!result.ok) return
       expect(result.value[0]?.turnPair.userContent).toBe('served by bm25')
-      expect(elapsed).toBeLessThan(1000)
+      // Generous bound: the hybrid promise never resolves on its own, so anything
+      // short of the test timeout proves the deadline (30 ms) did the work.
+      expect(elapsed).toBeLessThan(4000)
       expect(store.searchLex).toHaveBeenCalledTimes(1)
 
       // Telemetry: the deadline hit is counted (this is what /api/status + doctor read).

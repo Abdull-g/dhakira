@@ -19,6 +19,7 @@ import { CONSOLIDATE_PROMPT, fillTemplate } from '../extraction/prompts.js'
 import {
   invalidateMemoryFile,
   readMemoryConsolidated,
+  readMemoryExpiresAt,
   writeMemoryFile,
 } from '../extraction/runner.js'
 import type { ExtractedFact, MemoryRecord } from '../extraction/types.js'
@@ -28,7 +29,7 @@ import { scoreSalience } from '../salience/salience.js'
 import type { SalienceTier } from '../salience/types.js'
 import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
-import { computeExpiresAt } from './tier-policy.js'
+import { computeExpiresAt, isAgeExpired } from './tier-policy.js'
 
 type Result<T> = import('../proxy/types.js').Result<T>
 
@@ -183,6 +184,10 @@ export async function loadActiveMemories(walletDir: string): Promise<ActiveMemor
       const content = await readFile(filePath, 'utf8')
       const parsed = parseMemoryFile(content, basename(rel, '.md'))
       if (!parsed || parsed.invalidatedAt || parsed.forgottenAt || !parsed.body) continue
+      // v0.3.1 (D6): an age-expired memory the sweep has not reached yet is not
+      // active either — same tier rule as forget (trivia only; legacy standard
+      // stamps are inert).
+      if (isAgeExpired(parsed.salienceTier, readMemoryExpiresAt(content), new Date())) continue
       active.push({
         id: parsed.id,
         body: parsed.body,

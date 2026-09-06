@@ -634,6 +634,27 @@ async function maybeConsolidate(
 }
 
 /**
+ * Scheduled forget sweep (v0.3.1, audit D6). `runForget` used to be reachable only
+ * through `dhakira forget`, so TTLs never fired on their own. It is model-free and
+ * laptop-safe (forget.ts header), so it runs at the end of EVERY extraction run —
+ * even one that processed nothing — and once at daemon start (src/index.ts).
+ * Fully non-fatal; the dynamic import avoids a static runner↔forget cycle
+ * (forget imports the frontmatter readers + softForgetMemoryFile from here).
+ */
+async function maybeForget(walletDir: string, store: QMDStore): Promise<void> {
+  const logger = createLogger('extraction')
+  try {
+    const { runForget } = await import('../store/forget.js')
+    const fr = await runForget(walletDir, store)
+    if (!fr.ok) logger.warn('forget sweep failed (non-fatal)', { error: fr.error.message })
+  } catch (err) {
+    logger.warn('forget sweep failed (non-fatal)', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
+/**
  * T08 scoped project-doc rebuild trigger. Runs after regenerateProfile (global).
  * Fully non-fatal: a synthesis failure must NEVER abort extraction. The dynamic
  * import keeps the synthesis chain (collect/synthesize/harness) off the hot path
@@ -663,7 +684,7 @@ async function maybeRegenerateProjectDocs(
  * 4. Decide ADD/UPDATE/INVALIDATE/NOOP for each fact (Phase 2)
  * 5. Write memory files and apply invalidations
  * 6. Regenerate profile.md from HIGH-confidence memories
- * 7. Re-index QMD store and save updated state
+ * 7. Re-index QMD store, run the forget sweep, and save updated state
  */
 export async function runExtraction(
   walletDir: string,
@@ -722,6 +743,9 @@ export async function runExtraction(
     // synthesis ladder. Scoped, freshness-by-rebuild, fully non-fatal.
     await maybeRegenerateProjectDocs(walletDir, config, touchedProjectIds)
   }
+
+  // v0.3.1 (D6): the forget sweep runs on every extraction run, processed or not.
+  await maybeForget(walletDir, store)
 
   // Save state — only successfully processed IDs are in processedIds
   // Failed conversations are NOT included, so they'll be retried next run

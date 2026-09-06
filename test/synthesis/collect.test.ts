@@ -6,13 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { buildMemoryContent, writeMemoryFile } from '../../src/extraction/runner.ts'
 import type { MemoryRecord } from '../../src/extraction/types.ts'
+import type { SalienceTier } from '../../src/salience/types.ts'
 import {
   collectScopedMemories,
   type EligibleMemory,
   groupMemoriesByProject,
   SYNTHESIS_MAX_MEMORIES_PER_BUCKET,
 } from '../../src/synthesis/collect.ts'
-import type { SalienceTier } from '../../src/salience/types.ts'
 
 function mem(body: string, projectId: string, tier: SalienceTier = 'standard'): EligibleMemory {
   return { body, projectId, tier }
@@ -115,7 +115,10 @@ describe('collectScopedMemories — eligibility + scoping off disk', () => {
   })
 
   it('buckets eligible memories by their stamped projectId; excludes the ineligible', async () => {
-    await writeMemoryFile(walletDir, record({ id: 'g1', text: 'global identity', projectId: 'global' }))
+    await writeMemoryFile(
+      walletDir,
+      record({ id: 'g1', text: 'global identity', projectId: 'global' }),
+    )
     await writeMemoryFile(
       walletDir,
       record({ id: 'p1', text: 'project decision', projectId: 'git:github.com/o/r' }),
@@ -168,9 +171,14 @@ describe('collectScopedMemories — eligibility + scoping off disk', () => {
 
   it('a pre-T08 memory file with NO projectId line reads as global', async () => {
     // Hand-build a memory WITHOUT a projectId line (the pre-T08 on-disk shape).
-    const content = buildMemoryContent(record({ id: 'old', text: 'legacy fact', projectId: 'global' }))
+    const content = buildMemoryContent(
+      record({ id: 'old', text: 'legacy fact', projectId: 'global' }),
+    )
     expect(content).not.toMatch(/projectId/)
-    await writeMemoryFile(walletDir, record({ id: 'old', text: 'legacy fact', projectId: 'global' }))
+    await writeMemoryFile(
+      walletDir,
+      record({ id: 'old', text: 'legacy fact', projectId: 'global' }),
+    )
 
     const result = await collectScopedMemories(memoriesDir)
     expect(result.ok).toBe(true)
@@ -181,5 +189,53 @@ describe('collectScopedMemories — eligibility + scoping off disk', () => {
   it('returns an error Result when the memories dir does not exist', async () => {
     const result = await collectScopedMemories(join(walletDir, 'does-not-exist'))
     expect(result.ok).toBe(false)
+  })
+
+  // v0.3.1 (audit D6): expiry is enforced on READ, not only by the sweep.
+  it('excludes age-expired trivia even before a forget sweep; legacy standard stamps are inert', async () => {
+    const now = new Date('2026-09-06T00:00:00.000Z')
+    const past = new Date('2026-08-01T00:00:00.000Z')
+    const future = new Date('2027-01-01T00:00:00.000Z')
+    await writeMemoryFile(
+      walletDir,
+      record({
+        id: 'triv_expired',
+        text: 'expired trivia',
+        salienceTier: 'trivia',
+        expiresAt: past,
+      }),
+    )
+    await writeMemoryFile(
+      walletDir,
+      record({ id: 'triv_live', text: 'live trivia', salienceTier: 'trivia', expiresAt: future }),
+    )
+    await writeMemoryFile(
+      walletDir,
+      record({
+        id: 'std_legacy',
+        text: 'legacy standard',
+        salienceTier: 'standard',
+        expiresAt: past,
+      }),
+    )
+    await writeMemoryFile(
+      walletDir,
+      record({
+        id: 'core_stray',
+        text: 'core with stray stamp',
+        salienceTier: 'core',
+        expiresAt: past,
+      }),
+    )
+
+    const result = await collectScopedMemories(memoriesDir, now)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const bodies = result.value.get('global') ?? []
+    expect(bodies).not.toContain('expired trivia')
+    expect(bodies).toEqual(
+      expect.arrayContaining(['live trivia', 'legacy standard', 'core with stray stamp']),
+    )
+    expect(bodies).toHaveLength(3)
   })
 })

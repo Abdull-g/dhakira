@@ -306,7 +306,19 @@ $ dhakira consolidate    # merge redundant memories into denser ones
 $ dhakira forget         # retire expired and aged-superseded memories
 ```
 
-Both are explicit and reversible. `forget` is a soft forget — it marks memories as retired and stops surfacing them, but the files stay on disk. Memories scored as **core** are never retired. Superseded memories get a 14-day grace period before they're eligible, so a bad merge can be undone.
+Both are reversible. `forget` is a soft forget — it marks memories as retired and stops surfacing them, but the files stay on disk. Since v0.3.1 it also runs on its own: once when the daemon starts and at the end of every extraction run, and retrieval, profile synthesis and consolidation all ignore an expired fact even before the sweep reaches it.
+
+What retires, exactly:
+
+| Layer | Lifetime |
+|---|---|
+| Raw captures (`conversations/`) | **Permanent** by design — they are the mine future extraction re-synthesizes from. No TTL, no auto-delete. |
+| Turns (`turns/`) | Permanent (no retention policy yet — see the changelog for the v0.4 discussion). |
+| **core** facts | **Permanent.** Never retired by age; leave only when superseded by a newer fact, after a 14-day grace period. |
+| **standard** facts | **Supersession-only.** Never retired by age (the 180-day expiry from v0.3.0 is gone; existing stamps are ignored). Leave only when superseded, after the same 14-day grace. |
+| **trivia** facts | Retired **30 days** after creation. |
+
+The grace period exists so a bad consolidation merge can be undone before its sources are retired.
 
 ### Profile
 

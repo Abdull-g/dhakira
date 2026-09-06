@@ -7,6 +7,7 @@ import { parse } from 'yaml'
 
 import type { WalletConfig } from '../config/schema.js'
 import type { SalienceTier } from '../salience/types.js'
+import { isAgeExpired } from '../store/tier-policy.js'
 import { createLogger } from '../utils/logger.js'
 import { callExtractionLLM, extractContent } from './extract.js'
 import { fillTemplate, PROFILE_PROMPT } from './prompts.js'
@@ -35,7 +36,17 @@ interface MemoryFrontmatter {
   confidence: string
   invalidatedAt: string | null | undefined
   forgottenAt: string | null | undefined
+  /** Parsed `expiresAt`; null when absent / literal null / unparseable. */
+  expiresAt: Date | null
   salienceTier: SalienceTier
+}
+
+function parseDateOrNull(raw: unknown): Date | null {
+  if (raw === null || raw === undefined) return null
+  const text = String(raw)
+  if (text === 'null' || text === '') return null
+  const d = new Date(text)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 function parseMemoryFrontmatter(content: string): MemoryFrontmatter | null {
@@ -66,6 +77,7 @@ function parseMemoryFrontmatter(content: string): MemoryFrontmatter | null {
           : parsed.forgottenAt
             ? String(parsed.forgottenAt)
             : undefined,
+      expiresAt: parseDateOrNull(parsed.expiresAt),
       salienceTier,
     }
   } catch {
@@ -94,6 +106,8 @@ async function collectHighConfidenceMemories(memoriesDir: string): Promise<Resul
       const content = await readFile(join(memoriesDir, rel), 'utf8')
       const fm = parseMemoryFrontmatter(content)
       if (!fm || fm.confidence !== 'HIGH' || fm.invalidatedAt || fm.forgottenAt) continue
+      // v0.3.1 (D6): age-expired facts never feed the profile, swept or not.
+      if (isAgeExpired(fm.salienceTier, fm.expiresAt, new Date())) continue
       const body = extractMemoryBody(content)
       if (body) eligible.push({ body, tier: fm.salienceTier })
     } catch {
