@@ -54,7 +54,7 @@ export interface IngestInput {
   tool: string
   /** Optional model id (used for classifier rules + frontmatter). */
   model?: string
-  /** Explicit client-resolved projectId — used AS-IS (symmetric with recallOnce). */
+  /** Explicit client project signal — canonicalized via resolveProjectId (symmetric with /api/recall). */
   projectId?: string
   /** Local cwd to resolve a projectId from when none is explicit. Local read, NO network. */
   cwd?: string
@@ -93,16 +93,24 @@ export interface IngestResult {
 }
 
 /**
- * projectId precedence mirrors recallOnce: explicit id (used as-is) → cwd sniff
- * (local git read, never network) → 'global'. An adapter sends the SAME signal to
- * both /api/ingest and /api/recall so capture and recall scope to one project.
+ * projectId precedence mirrors recallOnce: explicit id → cwd sniff (local git
+ * read, never network) → 'global'. An adapter sends the SAME signal to both
+ * /api/ingest and /api/recall so capture and recall scope to one project.
+ *
+ * v0.3.1 (audit D12): the explicit id goes through the SAME pure resolver the
+ * proxy path uses, so a human tag becomes `explicit:<slug>` on every delivery
+ * path (it used to be stored raw here and slugged there — one tag, two scopes),
+ * while an already-canonical id (`git:…`, `folder:…`, `explicit:…`, `fp:…`,
+ * `global`) passes through untouched.
  */
 export async function resolveIngestProjectId(input: {
   projectId?: string
   cwd?: string
 }): Promise<string> {
   const explicit = input.projectId?.trim()
-  if (explicit !== undefined && explicit.length > 0) return explicit
+  if (explicit !== undefined && explicit.length > 0) {
+    return resolveProjectId({ explicitTag: explicit })
+  }
 
   const cwd = input.cwd?.trim()
   if (cwd === undefined || cwd.length === 0) return 'global'

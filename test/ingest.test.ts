@@ -13,7 +13,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { QMDStore } from '@tobilu/qmd'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// These tests are about the INGEST verb. ingestTrace fire-and-forgets the Layer-2
+// auto-trigger after every capture; since v0.3.1 hook captures actually reach
+// extraction, so the 10th capture in this file would start a real runExtraction
+// (external LLM call with the fixture key, background writes racing the tmpdir
+// cleanup). Keep it inert here — the trigger → extraction path has its own
+// end-to-end coverage in test/integration/hook-to-extraction.test.ts.
+vi.mock('../src/extraction/trigger.js', () => ({
+  maybeTriggerExtraction: vi.fn().mockResolvedValue(undefined),
+}))
 
 import type { WalletConfig } from '../src/config/schema.ts'
 import { createApiHandler } from '../src/dashboard/api.ts'
@@ -21,6 +31,7 @@ import { cleanSessionContent } from '../src/extraction/session-reconstructor.ts'
 import { ingestTrace, normalizeSessionId } from '../src/ingest.ts'
 import type { NormalizedMessage } from '../src/proxy/types.ts'
 import { createWalletStore } from '../src/retrieval/store.ts'
+import { resolveProjectId } from '../src/store/project.ts'
 
 function makeConfig(walletDir: string, incognito = false): WalletConfig {
   return {
@@ -73,6 +84,11 @@ describe('ingestTrace — generic hygiene chain', () => {
   })
 
   afterEach(async () => {
+    try {
+      await store.close()
+    } catch {
+      // already closed
+    }
     await rm(walletDir, { recursive: true, force: true })
   })
 
@@ -163,12 +179,26 @@ describe('ingestTrace — generic hygiene chain', () => {
     expect(cleaned).not.toContain('[SUGGESTION MODE')
   })
 
-  it('projectId ladder: explicit id wins and is used as-is', async () => {
+  it('projectId ladder: an explicit CANONICAL id wins and passes through unchanged', async () => {
     const result = await ingestTrace(
       { store, config: makeConfig(walletDir) },
       { messages: realConversation, tool: 'claude-code', projectId: 'git:github.com/acme/widgets' },
     )
     expect(result.projectId).toBe('git:github.com/acme/widgets')
+  })
+
+  it('projectId ladder (D12): an explicit human TAG is canonicalized to explicit:<slug>, identical to the proxy header path', async () => {
+    const result = await ingestTrace(
+      { store, config: makeConfig(walletDir) },
+      { messages: realConversation, tool: 'claude-code', projectId: 'My Payments App' },
+    )
+    expect(result.projectId).toBe('explicit:my-payments-app')
+    expect(result.projectId).toBe(resolveProjectId({ explicitTag: 'My Payments App' }))
+    // And it is what landed in the archive + turn frontmatter.
+    const [conversation] = await readConversations(walletDir)
+    expect(conversation).toContain('projectId: explicit:my-payments-app')
+    const [turn] = await readTurns(walletDir)
+    expect(turn).toContain('projectId: explicit:my-payments-app')
   })
 
   it('projectId ladder: resolves from cwd locally (folder id) with no explicit id', async () => {
@@ -258,6 +288,13 @@ describe('POST /api/ingest — handler', () => {
 
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
+    // Close the store BEFORE removing the dir — a late sqlite WAL checkpoint used
+    // to race `rm` and produce a flaky ENOTEMPTY under a loaded suite.
+    try {
+      await store.close()
+    } catch {
+      // already closed
+    }
     await rm(walletDir, { recursive: true, force: true })
   })
 

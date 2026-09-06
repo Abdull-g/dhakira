@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canonicalProjectId,
   folderId,
   normalizeGitRemote,
   type ProjectSignals,
@@ -106,6 +107,35 @@ describe('folderId', () => {
 // ---------------------------------------------------------------------------
 // resolveProjectId — the identity ladder
 // ---------------------------------------------------------------------------
+
+// v0.3.1 (audit D12): an explicit id that is ALREADY canonical passes through, so the
+// same project cannot split into `git:…` (proxy-resolved) and `explicit:git-…` (hook).
+describe('resolveProjectId — canonical explicit ids pass through (D12)', () => {
+  it.each([
+    'git:github.com/acme/widgets',
+    'folder:repo-1a2b3c',
+    'explicit:payments',
+    'fp:abc123def456',
+  ])('keeps %s as-is instead of re-wrapping it', (id) => {
+    expect(resolveProjectId(signals({ explicitTag: id, cwd: '/home/me/other' }))).toBe(id)
+    expect(canonicalProjectId(id)).toBe(id)
+  })
+
+  it('"global" as an explicit id is the global sentinel, not explicit:global', () => {
+    expect(resolveProjectId(signals({ explicitTag: 'global', cwd: '/home/me/repo' }))).toBe(
+      'global',
+    )
+  })
+
+  it('a human tag still becomes explicit:<slug> (the proxy header behaviour, now shared by hooks)', () => {
+    expect(resolveProjectId(signals({ explicitTag: 'My Payments App' }))).toBe(
+      'explicit:my-payments-app',
+    )
+    expect(canonicalProjectId('My Payments App')).toBeNull()
+    expect(canonicalProjectId('')).toBeNull()
+    expect(canonicalProjectId('git:')).toBeNull() // a bare scheme is not an id
+  })
+})
 
 describe('resolveProjectId — ladder priority', () => {
   it('explicit tag wins over everything', () => {

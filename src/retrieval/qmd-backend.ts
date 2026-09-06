@@ -22,7 +22,12 @@ export class QMDBackend implements RetrievalBackend {
       limit: opts.limit,
     })
     // QMD's search() returns HybridQueryResult[] where .body is ALWAYS present.
-    return hybridResults.map((r) => ({ score: r.score, body: r.body, file: r.file }))
+    return hybridResults.map((r) => ({
+      score: r.score,
+      body: r.body,
+      file: r.file,
+      source: 'hybrid' as const,
+    }))
   }
 
   async searchLex(
@@ -42,7 +47,7 @@ export class QMDBackend implements RetrievalBackend {
           r.body !== undefined && r.body !== null
             ? r.body
             : ((await this.store.getDocumentBody(fp)) ?? '')
-        return { score: r.score, body, file: fp }
+        return { score: r.score, body, file: fp, source: 'lex' as const }
       }),
     )
   }

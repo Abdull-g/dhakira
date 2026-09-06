@@ -112,12 +112,20 @@ describe('POST /api/recall — handler', () => {
     expect(b.projectId).toBe('global')
   })
 
-  it('explicit projectId is used as-is and echoed back', async () => {
+  it('explicit canonical projectId passes through and is echoed back', async () => {
     await startApi(makeConfig(walletDir))
     const { body } = await postRecall(
       JSON.stringify({ query: 'q', projectId: 'git:github.com/acme/widgets', tool: 'claude-code' }),
     )
     expect((body as { projectId: string }).projectId).toBe('git:github.com/acme/widgets')
+  })
+
+  it('explicit human tag is canonicalized to explicit:<slug> — the SAME scope /api/ingest stores (D12)', async () => {
+    await startApi(makeConfig(walletDir))
+    const { body } = await postRecall(
+      JSON.stringify({ query: 'q', projectId: 'My Payments App', tool: 'claude-code' }),
+    )
+    expect((body as { projectId: string }).projectId).toBe('explicit:my-payments-app')
   })
 
   it('resolves projectId from cwd via the SAME ladder /api/ingest uses (scopes match)', async () => {

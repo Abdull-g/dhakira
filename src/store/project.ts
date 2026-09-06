@@ -102,6 +102,20 @@ export function normalizeGitRemote(raw: string | undefined): string | null {
  * `._/-` (so tags like `payments/api` survive), collapses any other run to `-`,
  * trims stray dashes. Returns null when nothing usable remains.
  */
+/** The id schemes resolveProjectId itself emits. Anything carrying one is already canonical. */
+const CANONICAL_ID_PREFIX = /^(?:explicit|git|folder|fp):\S/
+
+/**
+ * Returns the trimmed id when it is already a canonical projectId (one of our own
+ * schemes, or the `global` sentinel); null for a plain human tag or empty input.
+ */
+export function canonicalProjectId(raw: string | undefined): string | null {
+  const trimmed = raw?.trim() ?? ''
+  if (trimmed.length === 0) return null
+  if (trimmed === 'global') return 'global'
+  return CANONICAL_ID_PREFIX.test(trimmed) ? trimmed : null
+}
+
 export function slugifyTag(raw: string | undefined): string | null {
   if (raw === undefined) return null
   const slug = raw
@@ -142,7 +156,13 @@ export function folderId(path: string | undefined): string | null {
  * → "global".
  */
 export function resolveProjectId(signals: ProjectSignals): string {
-  // 1. Explicit declared intent — always wins (header / connect env).
+  // 1. Explicit declared intent — always wins (header / connect env / hook payload).
+  //    v0.3.1 (audit D12): an id that is ALREADY canonical (a client that resolved
+  //    `git:…` itself, or a scope round-tripped from a previous recall) passes
+  //    through untouched, so the same project never splits into two scopes across
+  //    delivery paths. Anything else is a human tag → `explicit:<slug>`.
+  const canonical = canonicalProjectId(signals.explicitTag)
+  if (canonical !== null) return canonical
   const explicit = slugifyTag(signals.explicitTag)
   if (explicit !== null) return `explicit:${explicit}`
 

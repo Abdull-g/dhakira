@@ -196,18 +196,132 @@ describe('CP4 cross-tool project boost (the moat)', () => {
     expect(result.value[0]?.score).toBeCloseTo(0.6) // never boosted
   })
 
-  it('reserved seam: scopeMode "only" is threaded but ships NO new behavior (acts as boost)', async () => {
-    const store = makeStore([makeHybrid(claudeBody, '/wallet/turns/claude.md', 0.6)])
-    const result = await searchTurns(store, {
-      query: 'auth',
-      minScore: 0,
+  // v0.3.1 (audit D15): 'only' is real project isolation now, not an alias of 'boost'.
+  describe('scopeMode "only" — hard project isolation', () => {
+    const otherBody = turnBody({
+      sessionId: 'sess_other',
+      tool: 'claude-code',
+      contextFingerprint: 'otherfp00001',
+      projectId: OTHER_PROJECT,
+      userContent: 'How do I configure the deploy pipeline?',
+      assistantContent: 'Use the CI workflow file.',
+    })
+    const globalBody = turnBody({
+      sessionId: 'sess_global',
+      tool: 'claude-code',
+      contextFingerprint: 'default',
+      userContent: 'General coding question about closures.',
+      assistantContent: 'A closure captures its lexical scope.',
+    })
+    const mixedStore = () =>
+      makeStore([
+        makeHybrid(otherBody, '/wallet/turns/other.md', 0.9), // best raw score, WRONG project
+        makeHybrid(claudeBody, '/wallet/turns/claude.md', 0.6),
+        makeHybrid(globalBody, '/wallet/turns/global.md', 0.6),
+      ])
+
+    it('drops turns from OTHER projects, keeps same-project (boosted) and global (unboosted) turns', async () => {
+      const result = await searchTurns(mixedStore(), {
+        query: 'x',
+        minScore: 0,
+        recencyBoost: 0,
+        projectId: PROJECT,
+        scopeMode: 'only',
+      })
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const files = result.value.map((r) => r.source)
+      expect(files).not.toContain('/wallet/turns/other.md')
+      expect(files).toEqual(['/wallet/turns/claude.md', '/wallet/turns/global.md'])
+      expect(result.value[0]?.score).toBeCloseTo(0.9) // 0.6 × 1.5, same-project still boosted
+      expect(result.value[1]?.score).toBeCloseTo(0.6) // global kept, never boosted
+    })
+
+    it('"boost" (default) keeps the other-project turn — the two modes now differ', async () => {
+      const result = await searchTurns(mixedStore(), {
+        query: 'x',
+        minScore: 0,
+        recencyBoost: 0,
+        projectId: PROJECT,
+        scopeMode: 'boost',
+      })
+      expect(result.ok && result.value.map((r) => r.source)).toContain('/wallet/turns/other.md')
+    })
+
+    it('with no request scope (global / undefined) there is nothing to isolate to → nothing dropped', async () => {
+      for (const projectId of ['global', undefined]) {
+        const result = await searchTurns(mixedStore(), {
+          query: 'x',
+          minScore: 0,
+          recencyBoost: 0,
+          projectId,
+          scopeMode: 'only',
+        })
+        expect(result.ok && result.value).toHaveLength(3)
+      }
+    })
+  })
+})
+
+// v0.3.1 (audit D13): one minScore, two score scales. BM25 fallback scores are
+// normalized by the top BM25 hit so the threshold is a RELATIVE cut on that path.
+describe('minScore across hybrid vs BM25 scales (D13)', () => {
+  function lexStore(scores: number[]): QMDStore {
+    const results = scores.map((score, i) => ({
+      filepath: `/wallet/turns/lex-${i}.md`,
+      displayPath: `qmd://turns/lex-${i}.md`,
+      title: `t${i}`,
+      body: turnBody({
+        sessionId: `sess_${i}`,
+        tool: 'claude-code',
+        contextFingerprint: 'default',
+        userContent: `question ${i}`,
+        assistantContent: `answer ${i}`,
+      }),
+      context: '',
+      hash: `h${i}`,
+      docid: `d${i}`,
+      collectionName: 'turns',
+      modifiedAt: new Date().toISOString(),
+      bodyLength: 10,
+      score,
+      source: 'fts' as const,
+    }))
+    return {
+      search: vi.fn().mockRejectedValue(new Error('models cold')),
+      searchLex: vi.fn().mockResolvedValue(results),
+      getDocumentBody: vi.fn().mockResolvedValue(null),
+    } as unknown as QMDStore
+  }
+
+  it('BM25 fallback: unbounded scores are normalized by the top hit before the 0.3 cut', async () => {
+    // Raw BM25 12 / 3.6 / 1.2 → normalized 1.0 / 0.3 / 0.1 → the 0.1 one is cut.
+    const result = await searchTurns(lexStore([12, 3.6, 1.2]), {
+      query: 'q',
+      minScore: 0.3,
       recencyBoost: 0,
-      projectId: PROJECT,
-      scopeMode: 'only',
     })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    // Hard isolation is deferred: 'only' currently behaves exactly like 'boost'.
-    expect(result.value[0]?.score).toBeCloseTo(0.9)
+    expect(result.value.map((r) => r.score)).toEqual([1, 0.3, 0.1].slice(0, 2))
+    expect(result.value.map((r) => r.source)).toEqual([
+      '/wallet/turns/lex-0.md',
+      '/wallet/turns/lex-1.md',
+    ])
+  })
+
+  it('BM25 fallback: the top hit always scores 1.0, so a lone weak keyword match still passes (never an empty injection on a real hit)', async () => {
+    const result = await searchTurns(lexStore([0.05]), {
+      query: 'q',
+      minScore: 0.3,
+      recencyBoost: 0,
+    })
+    expect(result.ok && result.value.map((r) => r.score)).toEqual([1])
+  })
+
+  it('hybrid scores are NOT rescaled (a 0.25 hybrid hit is still below the 0.3 default)', async () => {
+    const store = makeStore([makeHybrid(claudeBody, '/wallet/turns/claude.md', 0.25)])
+    const result = await searchTurns(store, { query: 'q', recencyBoost: 0 })
+    expect(result.ok && result.value).toEqual([])
   })
 })

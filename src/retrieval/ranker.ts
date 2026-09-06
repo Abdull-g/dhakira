@@ -52,12 +52,11 @@ function deduplicateBySession(results: TurnSearchResult[]): TurnSearchResult[] {
 /**
  * Project-scope multiplier for the context ranking axis (T07).
  *
- * 'boost' (DEFAULT, shipping) gives a soft 1.5x to turns sharing the request's
- * projectId — stable across tools/machines (the moat), unlike the demoted
- * system-prompt fingerprint it replaces. 'only' (hard project isolation) is a
- * RESERVED seam: it is threaded end-to-end so it's not a future refactor, but no
- * behavior ships — it currently behaves identically to 'boost' and no caller sets
- * it (observe-first, same gate as consolidation's dark flag / T06's purge).
+ * Both modes give a soft 1.5x to turns sharing the request's projectId — stable
+ * across tools/machines (the moat), unlike the demoted system-prompt fingerprint
+ * it replaces. The modes differ in what happens to NON-matching turns: 'boost'
+ * keeps them (unboosted); 'only' drops them (see scopeFilter). "global" turns
+ * are never boosted in either mode.
  */
 function projectScopeMultiplier(scopeMode: ScopeMode, matched: boolean): number {
   if (!matched) return 1.0
@@ -69,17 +68,54 @@ function projectScopeMultiplier(scopeMode: ScopeMode, matched: boolean): number 
 }
 
 /**
+ * v0.3.1 (audit D15): 'only' is a REAL post-filter now, not a silent alias of
+ * 'boost'. With a real request scope it keeps turns that share the projectId
+ * plus 'global' turns (cross-project identity such as profile-derived memory
+ * must still surface); everything from OTHER projects is dropped. With no scope
+ * (undefined / 'global') there is nothing to isolate to, so nothing is dropped.
+ */
+function scopeFilter(
+  results: TurnSearchResult[],
+  scopeMode: ScopeMode,
+  projectId: string | undefined,
+): TurnSearchResult[] {
+  if (scopeMode !== 'only' || projectId === undefined || projectId === 'global') return results
+  return results.filter(
+    (r) => r.turnPair.projectId === projectId || r.turnPair.projectId === 'global',
+  )
+}
+
+/**
+ * v0.3.1 (audit D13): hybrid scores are a 0–1 position-blended value, BM25
+ * (`searchLex`) scores are unbounded — so one `minScore` cannot mean the same
+ * thing on both paths. DECISION: normalize BM25 scores by the top BM25 hit so
+ * they land in (0, 1] and `minScore` becomes a RELATIVE cut on the fallback path
+ * ("keep hits scoring at least 30% of the best keyword match"). Rejected
+ * alternative — skipping `minScore` for BM25 — would inject weak keyword hits
+ * unfiltered whenever the models are cold. Hybrid scores are untouched.
+ */
+function normalizeRelevance(candidates: RawCandidate[]): (raw: RawCandidate) => number {
+  let lexTop = 0
+  for (const c of candidates) {
+    if (c.source === 'lex' && c.score > lexTop) lexTop = c.score
+  }
+  return (raw) => (raw.source === 'lex' && lexTop > 0 ? raw.score / lexTop : raw.score)
+}
+
+/**
  * Apply OUR ranking to raw backend candidates.
  *
  * Parses each body, applies recency boosting so recent relevant turns score higher:
  *   finalScore = relevanceScore × (1 + recencyBoost × recencyFactor) × contextMultiplier
- * where recencyFactor decays linearly from 1.0 (today) to 0.0 (≥90 days ago) and
- * contextMultiplier is 1.5x for turns sharing the request's projectId (the T07
- * context axis — fingerprint is no longer compared directly; it only feeds the
- * upstream resolver). "global" never boosts.
+ * where relevanceScore is the hybrid score (or the BM25 score normalized by the top
+ * BM25 hit — see normalizeRelevance), recencyFactor decays linearly from 1.0
+ * (today) to 0.0 (≥90 days ago) and contextMultiplier is 1.5x for turns sharing
+ * the request's projectId (the T07 context axis — fingerprint is no longer
+ * compared directly; it only feeds the upstream resolver). "global" never boosts.
  *
  * Then sorts by score descending, collapses same-session near-duplicates (>90% word
- * overlap, keeping the higher-scored entry), filters below `minScore`, and slices to `limit`.
+ * overlap, keeping the higher-scored entry), applies the scopeMode filter, filters
+ * below `minScore`, and slices to `limit`.
  */
 export function rankCandidates(
   candidates: RawCandidate[],
@@ -87,6 +123,7 @@ export function rankCandidates(
 ): TurnSearchResult[] {
   const logger = createLogger('retrieval')
   const { limit = 8, minScore = 0.3, recencyBoost = 0.3, projectId, scopeMode = 'boost' } = options
+  const relevanceOf = normalizeRelevance(candidates)
 
   // Parse turn pairs, apply recency boost, collect valid results.
   const scored: TurnSearchResult[] = []
@@ -100,12 +137,12 @@ export function rankCandidates(
     const projectMatch =
       projectId !== undefined && projectId !== 'global' && turnPair.projectId === projectId
     const contextMultiplier = projectScopeMultiplier(scopeMode, projectMatch)
-    const finalScore = raw.score * (1 + recencyBoost * recencyFactor) * contextMultiplier
+    const finalScore = relevanceOf(raw) * (1 + recencyBoost * recencyFactor) * contextMultiplier
     scored.push({ turnPair, score: finalScore, source: raw.file })
   }
 
-  // Sort, deduplicate, filter, slice.
+  // Sort, deduplicate, scope-filter, threshold, slice.
   scored.sort((a, b) => b.score - a.score)
-  const deduped = deduplicateBySession(scored)
+  const deduped = scopeFilter(deduplicateBySession(scored), scopeMode, projectId)
   return deduped.filter((r) => r.score >= minScore).slice(0, limit)
 }

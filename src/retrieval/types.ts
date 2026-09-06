@@ -5,11 +5,12 @@ export type { CapturedTurnPair as TurnPair }
 
 /**
  * How the project scope is applied to the context ranking axis.
- * - 'boost' (DEFAULT, shipping): soft 1.5x for same-project turns; global memory
- *   (e.g. profile.md identity) still surfaces everywhere.
- * - 'only' (RESERVED seam, DEFERRED): hard project isolation — built into the
- *   parameter path so it's not a future refactor, but no behavior ships and no
- *   caller sets it (observe-first, same gate as consolidation's dark flag).
+ * - 'boost' (DEFAULT): soft 1.5x for same-project turns; turns from other
+ *   projects are kept (unboosted); global memory surfaces everywhere.
+ * - 'only' (v0.3.1, audit D15): hard project isolation — same-project turns get
+ *   the 1.5x AND turns from OTHER projects are dropped. 'global' turns (e.g.
+ *   profile-derived identity) are still kept. With no request scope there is
+ *   nothing to isolate to, so it behaves like 'boost'.
  */
 export type ScopeMode = 'boost' | 'only'
 
