@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { QMDStore } from '@tobilu/qmd'
@@ -119,6 +119,36 @@ describe('maybeTriggerExtraction', () => {
 
     await maybeTriggerExtraction(walletDir, store, config)
     expect(runExtractionMock).toHaveBeenCalledTimes(1)
+  })
+
+  // v0.3.1 (audit D14): the counter survives a daemon restart.
+  it('persists the capture counter to .extraction-state.json and resumes it after a restart', async () => {
+    const first = await loadTrigger()
+    const config = makeConfig()
+    const store = makeStore()
+
+    for (let i = 0; i < 7; i++) await first.maybeTriggerExtraction(walletDir, store, config)
+    await first.flushTriggerState()
+    const onDisk = JSON.parse(
+      await readFile(join(walletDir, '.extraction-state.json'), 'utf8'),
+    ) as { capturedSinceLastTrigger?: number; lastRunAt?: unknown }
+    expect(onDisk.capturedSinceLastTrigger).toBe(7)
+    expect(onDisk.lastRunAt).toBeNull()
+
+    // "Restart": a fresh module instance (counter would have been 0 before v0.3.1).
+    const restarted = await loadTrigger()
+    for (let i = 0; i < 2; i++) await restarted.maybeTriggerExtraction(walletDir, store, config)
+    expect(runExtractionMock).not.toHaveBeenCalled() // 7 + 2 = 9 < 10
+
+    await restarted.maybeTriggerExtraction(walletDir, store, config) // 10th overall
+    expect(runExtractionMock).toHaveBeenCalledTimes(1)
+
+    // After firing, the persisted counter is back to 0.
+    await restarted.flushTriggerState()
+    const after = JSON.parse(await readFile(join(walletDir, '.extraction-state.json'), 'utf8')) as {
+      capturedSinceLastTrigger?: number
+    }
+    expect(after.capturedSinceLastTrigger).toBe(0)
   })
 
   it('fires after 50 turns once a prior extraction exists', async () => {

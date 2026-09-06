@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildInjectionBlock } from '../../src/injection/builder.ts'
-import { estimateTokens } from '../../src/utils/tokens.ts'
-import type { TurnSearchResult } from '../../src/retrieval/types.ts'
 import type { WalletConfig } from '../../src/config/schema.ts'
+import { buildInjectionBlock, USER_ENTRY_MAX_CHARS } from '../../src/injection/builder.ts'
+import type { TurnSearchResult } from '../../src/retrieval/types.ts'
+import { estimateTokens } from '../../src/utils/tokens.ts'
 
 const defaultConfig: WalletConfig['injection'] = {
   maxTokens: 2000,
@@ -88,7 +88,12 @@ describe('buildInjectionBlock — structure', () => {
   })
 
   it('includes both profile and turns sections when both provided', () => {
-    const block = buildInjectionBlock('- TypeScript developer', null, [makeTurnResult()], defaultConfig)
+    const block = buildInjectionBlock(
+      '- TypeScript developer',
+      null,
+      [makeTurnResult()],
+      defaultConfig,
+    )
     expect(block.text).toContain('## About You')
     expect(block.text).toContain('## Relevant Past Conversations')
     expect(block.hasProfile).toBe(true)
@@ -181,12 +186,22 @@ describe('buildInjectionBlock — assistant response truncation', () => {
 
 describe('buildInjectionBlock — token budget', () => {
   it('reports non-zero tokenCount when content is present', () => {
-    const block = buildInjectionBlock('- TypeScript developer', null, [makeTurnResult()], defaultConfig)
+    const block = buildInjectionBlock(
+      '- TypeScript developer',
+      null,
+      [makeTurnResult()],
+      defaultConfig,
+    )
     expect(block.tokenCount).toBeGreaterThan(0)
   })
 
   it('tokenCount matches estimateTokens of the output text', () => {
-    const block = buildInjectionBlock('- TypeScript developer', null, [makeTurnResult()], defaultConfig)
+    const block = buildInjectionBlock(
+      '- TypeScript developer',
+      null,
+      [makeTurnResult()],
+      defaultConfig,
+    )
     expect(block.tokenCount).toBe(estimateTokens(block.text))
   })
 
@@ -249,6 +264,64 @@ describe('buildInjectionBlock — token budget', () => {
     )
     const block = buildInjectionBlock('', null, results, strictConfig)
     expect(block.memoryCount).toBeLessThanOrEqual(2)
+  })
+
+  // v0.3.1 (audit D9): one oversized top-ranked turn must not starve the rest.
+  it('skips an oversized top-ranked turn and still fills the budget with smaller lower-ranked turns', () => {
+    const config: WalletConfig['injection'] = {
+      maxTokens: 200,
+      minRelevanceScore: 0,
+      recencyBoost: 0,
+      maxTurns: 8,
+    }
+    // truncateAssistant keeps up to 3 sentences, so make each one ~400 chars: the
+    // entry is ~300 tokens against a 200-token ceiling — it cannot fit, ever.
+    const filler =
+      ' pipelines runners caches artifacts secrets environments approvals rollbacks observability dashboards'
+    const giant = makeTurnResult(
+      {
+        userContent: 'Explain everything about our deployment pipeline in detail',
+        assistantContent: Array.from(
+          { length: 3 },
+          (_, i) =>
+            `Sentence ${i} of an extremely long answer that goes on and on about${filler.repeat(4)}.`,
+        ).join(' '),
+        turnIndex: 0,
+      },
+      0.99,
+    )
+    const small1 = makeTurnResult(
+      { userContent: 'Why pgBouncer?', assistantContent: 'Transaction mode.', turnIndex: 1 },
+      0.9,
+    )
+    const small2 = makeTurnResult(
+      { userContent: 'Why squash merges?', assistantContent: 'Linear history.', turnIndex: 2 },
+      0.8,
+    )
+    const block = buildInjectionBlock('', null, [giant, small1, small2], config)
+    expect(block.text).not.toContain('Sentence 0 of an extremely long answer')
+    expect(block.text).toContain('Why pgBouncer?')
+    expect(block.text).toContain('Why squash merges?')
+    expect(block.memoryCount).toBe(2)
+    expect(block.tokenCount).toBeLessThanOrEqual(config.maxTokens)
+  })
+
+  it('caps the USER side of an injected entry at ~300 chars (assistant side already truncated)', () => {
+    const longUser = `Please review this: ${'word '.repeat(200)}end of paste`
+    const block = buildInjectionBlock(
+      '',
+      null,
+      [makeTurnResult({ userContent: longUser, assistantContent: 'Looks fine.' })],
+      defaultConfig,
+    )
+    const line = block.text.split('\n').find((l) => l.includes('You:')) ?? ''
+    const userPart = line.slice(line.indexOf('You: ') + 5)
+    expect(userPart.length).toBeLessThanOrEqual(USER_ENTRY_MAX_CHARS + 1) // + ellipsis
+    expect(userPart.endsWith('…')).toBe(true)
+    expect(userPart).not.toContain('end of paste')
+    // Short user text is untouched.
+    const short = buildInjectionBlock('', null, [makeTurnResult()], defaultConfig)
+    expect(short.text).toContain('You: How do I implement connection pooling?')
   })
 })
 

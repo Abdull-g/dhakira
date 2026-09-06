@@ -6,6 +6,7 @@ import {
   clearQualityGateRejections,
   evaluateTurnPair,
   getQualityGateRejections,
+  REJECTION_LOG_MAX,
 } from '../../src/capture/quality-gate.ts'
 import type { TurnPair } from '../../src/capture/turns.ts'
 
@@ -104,6 +105,20 @@ describe('quality gate', () => {
     expect(getQualityGateRejections()).toEqual([
       { pairId: 'turn_bad', reasons: ['user_too_short'] },
     ])
+  })
+
+  it('caps the in-memory rejection log as a ring buffer (D14: no unbounded growth in a long-lived daemon)', () => {
+    clearQualityGateRejections()
+    const pairs = Array.from({ length: REJECTION_LOG_MAX + 25 }, (_, i) =>
+      makePair({ id: `turn_bad_${i}`, userContent: 'short' }),
+    )
+    applyQualityGate(pairs)
+    const log = getQualityGateRejections()
+    expect(log).toHaveLength(REJECTION_LOG_MAX)
+    // Oldest dropped, newest kept.
+    expect(log[0]?.pairId).toBe('turn_bad_25')
+    expect(log[log.length - 1]?.pairId).toBe(`turn_bad_${REJECTION_LOG_MAX + 24}`)
+    clearQualityGateRejections()
   })
 
   it('tags oversized and complex tool flows without rejecting them', () => {

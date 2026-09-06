@@ -1,8 +1,16 @@
-import type { QMDStore } from '@tobilu/qmd'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { QMDStore } from '@tobilu/qmd'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Capture-wiring tests: keep the Layer-2 auto-trigger inert. The real trigger would
+// start runExtraction (local model!) after 10 captures and its background writes
+// raced the tmpdir polling below under a loaded suite (v0.3.1 test hygiene).
+vi.mock('../../src/extraction/trigger.js', () => ({
+  maybeTriggerExtraction: vi.fn().mockResolvedValue(undefined),
+}))
+
 import type { WalletConfig } from '../../src/config/schema.ts'
 import { createCaptureConversation } from '../../src/index.ts'
 import { parseOpenAIRequest } from '../../src/proxy/openai.ts'
@@ -39,7 +47,10 @@ function makeConfig(walletDir: string): WalletConfig {
   }
 }
 
-function makeStore(indexedContents: IndexedContent[], indexedDocuments: IndexedDocument[]): QMDStore {
+function makeStore(
+  indexedContents: IndexedContent[],
+  indexedDocuments: IndexedDocument[],
+): QMDStore {
   return {
     internal: {
       findActiveDocument: () => null,
@@ -119,8 +130,7 @@ describe('OpenAI v2 capture pipeline live wiring', () => {
         },
         {
           role: 'user',
-          content:
-            'Please explain the capture flow.\n<source>\nsrc/capture/ingest.ts\n</source>',
+          content: 'Please explain the capture flow.\n<source>\nsrc/capture/ingest.ts\n</source>',
         },
       ],
     }

@@ -122,6 +122,9 @@ export function rankCandidates(
   options: TurnSearchOptions,
 ): TurnSearchResult[] {
   const logger = createLogger('retrieval')
+  // CALIBRATION: the 0.3 default floor is calibrated against @tobilu/qmd 2.0.1's
+  // hybrid score blend (rank 1 ≥ ~0.75 by construction, rank 2 ≥ ~0.375…). QMD is
+  // pinned to that exact version in package.json (D16); re-measure before any bump.
   const { limit = 8, minScore = 0.3, recencyBoost = 0.3, projectId, scopeMode = 'boost' } = options
   const relevanceOf = normalizeRelevance(candidates)
 

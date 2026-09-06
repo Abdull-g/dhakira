@@ -8,26 +8,38 @@
 // Standing Order #7: this module imports only retrieval/injection/synthesis
 // (engine layers). It must NOT import proxy or dashboard. The projectId resolver
 // is INJECTED (deps.resolveProjectId) precisely so recall.ts never has to reach
-// into the proxy to sniff a request. `NormalizedRequest` is a type-only import.
+// into the proxy to sniff a request. The request context it is typed against is
+// a LOCAL shape (v0.3.1, audit D10) — not the proxy's NormalizedRequest — so the
+// only delivery-layer import left is the allowed `NormalizedMessage` utility type.
 
 import type { QMDStore } from '@tobilu/qmd'
 import type { WalletConfig } from './config/schema.js'
 import { buildInjectionBlock } from './injection/builder.js'
 import { loadProfile } from './injection/profile.js'
-import type { NormalizedRequest } from './proxy/types.js'
+import type { NormalizedMessage } from './proxy/types.js'
 import { searchTurns } from './retrieval/search.js'
 import type { TurnSearchResult } from './retrieval/types.js'
 import { loadProjectDoc, projectDisplayName } from './synthesis/project-doc.js'
+
+/**
+ * The minimal request context an adapter may hand to recall for projectId
+ * sniffing. Structurally satisfied by the proxy's NormalizedRequest (and by any
+ * future adapter's shape) without the engine depending on the proxy's type.
+ */
+export interface RecallRequestContext {
+  systemPrompt?: string | null
+  messages: NormalizedMessage[]
+}
 
 export interface RecallDeps {
   store: QMDStore
   config: WalletConfig
   /**
-   * Resolve a projectId from a proxy request (cwd sniff → git → fingerprint).
+   * Resolve a projectId from the request context (cwd sniff → git → fingerprint).
    * Injected so recall.ts stays free of proxy imports. Optional: adapters that
    * already know their project pass `input.projectId` and omit this entirely.
    */
-  resolveProjectId?: (normalized: NormalizedRequest) => Promise<string>
+  resolveProjectId?: (context: RecallRequestContext) => Promise<string>
 }
 
 export interface RecallInput {
@@ -35,8 +47,8 @@ export interface RecallInput {
   query: string
   /** Explicit, client-resolved projectId. Takes precedence over any sniff. */
   projectId?: string
-  /** Proxy request — used ONLY to sniff projectId when none is passed explicitly. */
-  normalized?: NormalizedRequest
+  /** Request context — used ONLY to sniff projectId when none is passed explicitly. */
+  normalized?: RecallRequestContext
 }
 
 export interface RecallResult {

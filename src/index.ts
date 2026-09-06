@@ -26,13 +26,13 @@ import type { WalletConfig } from './config/schema.js'
 import { createDashboardServer } from './dashboard/server.js'
 import { maybeTriggerExtraction } from './extraction/trigger.js'
 import { injectIntoSystemPrompt } from './injection/injector.js'
-import { computeContextFingerprint } from './proxy/fingerprint.js'
 import type { ProxyDeps } from './proxy/server.js'
 import { createProxyServer } from './proxy/server.js'
 import type { NormalizedMessage, NormalizedRequest } from './proxy/types.js'
 import { recallOnce } from './recall.js'
 import { indexTurnPair, startReconciliation, stopReconciliation } from './retrieval/indexer.js'
 import { createWalletStore } from './retrieval/store.js'
+import { computeContextFingerprint } from './store/fingerprint.js'
 import { runForget } from './store/forget.js'
 import { readGitIdentity } from './store/git-identity.js'
 import { resolveProjectId, sniffCwd } from './store/project.js'
@@ -463,8 +463,10 @@ export async function main(): Promise<void> {
 
       // Pure core: retrieval + composition, no stdout. The proxy passes `normalized`
       // so the same gatherProjectId sniff runs as before (T07 query-side axis).
+      // gatherProjectId needs the proxy's full NormalizedRequest (headers); the
+      // engine seam is typed against a narrower context, so bind it here.
       const result = await recallOnce(
-        { store, config, resolveProjectId: gatherProjectId },
+        { store, config, resolveProjectId: () => gatherProjectId(normalized) },
         { query: lastUserMessage, normalized },
       )
       if (result.text === null) return null

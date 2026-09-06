@@ -60,6 +60,10 @@ const VALID_CONFIDENCES: readonly ExtractedFact['confidence'][] = ['HIGH', 'MEDI
  * narrows intent, and the deterministic verifier (CP3) is the real, model-free
  * floor against data loss. Module constant (NOT config) so it's trivially
  * tunable once a real wallet is measured.
+ *
+ * CALIBRATION: this value is calibrated against @tobilu/qmd 2.0.1's hybridQuery
+ * score blend (position-aware RRF × reranker). QMD is pinned to that exact
+ * version in package.json (D16); re-measure before any bump.
  */
 const CLUSTER_SCORE_THRESHOLD = 0.54
 

@@ -361,7 +361,7 @@ function generateLaunchdPlist(execPath: string, scriptPath: string): string {
 function generateSystemdService(execPath: string, scriptPath: string): string {
   return [
     '[Unit]',
-    'Description=Dhakira AI Memory Proxy',
+    'Description=Dhakira AI memory daemon (hooks + dashboard)',
     'After=network.target',
     '',
     '[Service]',
@@ -475,7 +475,7 @@ function printHelp(): void {
     ${cmd} [command]
 
   ${c.bold('Commands:')}
-    ${c.cyan('init')}       Set up Dhakira (API key or Claude Max/Pro subscription)
+    ${c.cyan('init')}       Set up your wallet (hooks-first; external model optional)
     ${c.cyan('start')}      Start Dhakira (daemon, hooks, dashboard)
     ${c.cyan('stop')}       Stop a running Dhakira instance
     ${c.cyan('status')}     Show current status and statistics
@@ -517,63 +517,71 @@ async function commandInit(): Promise<void> {
     // Good — wallet doesn't exist yet
   }
 
-  // Detect API keys
-  console.log(`  Checking environment...`)
+  // Hooks-first (v0.3.1): Dhakira works through Claude Code / Codex hooks. No API
+  // key is needed for that — hooks see your tool's turns whatever auth it uses,
+  // subscription or key. Keys matter only for the OPTIONAL external extractor.
+  console.log(`  Dhakira connects to your tools through their hooks — no API key required.`)
+  console.log(`  ${c.dim('After setup: dhakira connect claude-code  ·  dhakira connect codex')}`)
+  console.log('')
+
+  // Detect API keys — offered ONLY for the optional external memory-synthesis model.
   const detected: ToolDef[] = []
   for (const tool of KNOWN_TOOLS) {
-    if (process.env[tool.envVar]) {
-      console.log(
-        `  ${c.green('✓')} Found ${tool.envVar} → configured ${c.dim(`(${tool.displayUrl})`)}`,
-      )
-      detected.push(tool)
-    }
-  }
-
-  let addAnthropicWildcard = detected.some((tool) => tool.provider === 'anthropic')
-  const addOpenAIWildcard = detected.some((tool) => tool.provider === 'openai')
-  if (!detected.some((tool) => tool.provider === 'anthropic')) {
-    console.log('')
-    console.log(`  Do you use Claude Code with a Max/Pro subscription (not API key)?`)
-    console.log(`  This adds a pass-through config so Dhakira can proxy your OAuth traffic.`)
-    const subscription = await prompt(`  [y/N] › `)
-    addAnthropicWildcard = subscription.toLowerCase() === 'y'
-  }
-
-  // Detect local model servers
-  const detectedLocal: LocalServer[] = []
-  for (const server of LOCAL_SERVERS) {
-    const alive = await probeLocalServer(server)
-    if (alive) {
-      console.log(`  ${c.green('✓')} Found ${server.name} → configured ${c.dim(`(${server.url})`)}`)
-      detectedLocal.push(server)
-    }
-  }
-
-  if (detected.length === 0 && detectedLocal.length === 0) {
-    console.log(`  ${c.yellow('!')}  No API keys or local model servers found.`)
-    console.log(`  ${c.dim('Cloud: set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OPENROUTER_API_KEY')}`)
-    console.log(`  ${c.dim('Local: start Ollama, LM Studio, or any OpenAI-compatible server')}`)
-    console.log('')
-    const proceed = await prompt(`  Continue anyway? [y/N] `)
-    if (proceed.toLowerCase() !== 'y') {
-      console.log('')
-      return
-    }
+    if (process.env[tool.envVar]) detected.push(tool)
   }
 
   let extractionTool: ToolDef | null = null
   if (detected.length > 0) {
     const candidate = detected[0]
+    console.log(
+      `  ${c.green('✓')} Found ${candidate.envVar} ${c.dim(`(${candidate.displayUrl})`)} — usable for memory synthesis.`,
+    )
     const useExternal = await prompt(
-      `  For memory synthesis, Dhakira uses a local model by default — fully private, no API calls. We can also use your detected ${extractionProviderName(candidate)} for slightly higher quality (~$0.01/refresh). Use external? [y/N] `,
+      `  For memory synthesis, Dhakira uses a local model by default — fully private, no API calls. We can also use your ${extractionProviderName(candidate)} key for slightly higher quality (~$0.01/refresh; secrets are redacted before anything is sent). Use external? [y/N] `,
     )
     if (useExternal.toLowerCase() === 'y') {
       extractionTool = candidate
     }
   } else {
     console.log(
-      '  Dhakira will use its built-in local model for memory synthesis (~730MB, downloaded on first use). All private, no cost.',
+      `  ${c.dim('No external model key found — memory synthesis will use the built-in local model (~730MB, downloaded on first use). Private, no cost.')}`,
     )
+  }
+
+  // Base-URL proxy (SECONDARY path, for tools without hooks) — explicit opt-in.
+  let proxyTools: ToolDef[] = []
+  let detectedLocal: LocalServer[] = []
+  let addAnthropicWildcard = false
+  let addOpenAIWildcard = false
+  console.log('')
+  const wantProxy = await prompt(
+    `  Also configure the base-URL proxy for tools WITHOUT hooks (localhost:4100)? [y/N] `,
+  )
+  if (wantProxy.toLowerCase() === 'y') {
+    proxyTools = detected
+    for (const tool of proxyTools) {
+      console.log(
+        `  ${c.green('✓')} Routing ${tool.name} through the proxy ${c.dim(`(${tool.displayUrl})`)}`,
+      )
+    }
+    for (const server of LOCAL_SERVERS) {
+      if (await probeLocalServer(server)) {
+        console.log(
+          `  ${c.green('✓')} Found ${server.name} → configured ${c.dim(`(${server.url})`)}`,
+        )
+        detectedLocal.push(server)
+      }
+    }
+    addAnthropicWildcard = proxyTools.some((tool) => tool.provider === 'anthropic')
+    addOpenAIWildcard = proxyTools.some((tool) => tool.provider === 'openai')
+    if (!addAnthropicWildcard) {
+      const passthrough = await prompt(
+        `  Add an Anthropic pass-through entry (for a hook-less tool that sends its own auth)? [y/N] `,
+      )
+      addAnthropicWildcard = passthrough.toLowerCase() === 'y'
+    }
+  } else {
+    detectedLocal = []
   }
 
   // Create wallet directory structure
@@ -584,7 +592,7 @@ async function commandInit(): Promise<void> {
   await writeFile(
     join(walletDir, 'config.yaml'),
     generateConfigYaml(
-      detected,
+      proxyTools,
       detectedLocal,
       addAnthropicWildcard,
       addOpenAIWildcard,
@@ -640,7 +648,7 @@ async function commandInit(): Promise<void> {
     }
   }
 
-  // Start the proxy
+  // Start the daemon (hooks API + dashboard; the base-URL proxy is the secondary path)
   const { loadConfig } = await import('./config/loader.js')
   const configResult = await loadConfig(walletDir)
   if (!configResult.ok) {
@@ -650,21 +658,26 @@ async function commandInit(): Promise<void> {
   const config = configResult.value
 
   const hasLocal = detectedLocal.length > 0
-  const hasCloud = detected.length > 0
+  const hasCloud = proxyTools.length > 0 || extractionTool !== null
 
   console.log(`  ${c.bold('Next steps:')}`)
   console.log('')
-  console.log(`  ${c.dim('# Connect your tools')}`)
+  console.log(`  ${c.dim('# Connect your tools (hooks — the primary path)')}`)
   console.log(`  dhakira connect claude-code`)
   console.log(`  dhakira connect codex`)
   console.log('')
-  console.log(`  ${c.dim('# Other tools (base-URL routing)')}`)
-  console.log(`  export OPENAI_BASE_URL=http://localhost:4100/v1`)
+  if (proxyTools.length > 0 || detectedLocal.length > 0 || addAnthropicWildcard) {
+    console.log(`  ${c.dim('# Tools without hooks (base-URL proxy)')}`)
+    console.log(`  export OPENAI_BASE_URL=http://localhost:4100/v1`)
+    console.log('')
+  }
+  console.log(`  ${c.dim('# Check recall latency against the hook budget any time')}`)
+  console.log(`  dhakira doctor`)
   console.log('')
 
-  if (hasLocal && !hasCloud) {
+  if (extractionTool === null && !hasCloud) {
     console.log(`
-  ${c.green('Full local stack detected.')} Your data never leaves your machine.`)
+  ${c.green('Fully local.')} Capture, search and memory synthesis never leave your machine.`)
   } else if (hasLocal && hasCloud) {
     console.log(`
   ${c.dim('Local + cloud tools configured. Dhakira works with both.')}`)

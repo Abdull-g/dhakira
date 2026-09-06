@@ -61,7 +61,7 @@
     "vitest": "^4.1.0"
   },
   "dependencies": {
-    "@tobilu/qmd": "^2.0.1",
+    "@tobilu/qmd": "2.0.1",
     "node-llama-cpp": "3.18.1",
     "smol-toml": "^1.7.0",
     "yaml": "^2.8.2"

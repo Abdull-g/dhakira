@@ -17,6 +17,13 @@ export interface QualityGateLogEntry {
   reasons: QualityRejectReason[]
 }
 
+/**
+ * Ring-buffer cap for the in-memory rejection log (v0.3.1, audit D14). The log
+ * is diagnostics only; unbounded, a long-lived daemon that rejects many pairs
+ * would grow it forever. Oldest entries are dropped once the cap is reached.
+ */
+export const REJECTION_LOG_MAX = 500
+
 const rejectionLog: QualityGateLogEntry[] = []
 const JUNK_ASSISTANT = /^(I(\s|')?ll(?:\s|$)|Let me(?:\s|$)|Sure,?(?:\s|$)|Okay,?(?:\s|$))/i
 
@@ -56,6 +63,9 @@ export function applyQualityGate(pairs: TurnPair[]): TurnPair[] {
     const result = evaluateTurnPair(pair)
     if (!result.keep) {
       rejectionLog.push({ pairId: pair.id, reasons: result.reasons })
+      if (rejectionLog.length > REJECTION_LOG_MAX) {
+        rejectionLog.splice(0, rejectionLog.length - REJECTION_LOG_MAX)
+      }
     }
     return result.keep
   })

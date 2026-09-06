@@ -2,7 +2,23 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const ENGINE_DIRS = ['capture', 'retrieval', 'extraction', 'injection', 'config', 'utils']
+// v0.3.1 (audit D10): the guard now covers EVERY engine directory plus the
+// root-level engine verbs, not just the four the original ticket named.
+const ENGINE_DIRS = [
+  'capture',
+  'retrieval',
+  'extraction',
+  'injection',
+  'config',
+  'utils',
+  'store',
+  'salience',
+  'synthesis',
+  'harness',
+  'hooks',
+]
+/** Root-level engine modules (src/*.ts). index.ts + cli.ts are composition roots and exempt. */
+const ENGINE_ROOT_FILES = ['ingest.ts', 'recall.ts', 'doctor.ts']
 const ALLOWED_PROXY_TYPES = new Set(['Result', 'NormalizedMessage'])
 const ROOT = process.cwd()
 
@@ -44,6 +60,24 @@ describe('Standing Order #7: engine layer import boundary', () => {
     expect(classifyImportLine("import type { OtherType } from '../proxy/types.js'")).toBe(
       'only Result and NormalizedMessage may be imported from proxy/types.js',
     )
+    // Root-level engine files import with a single './' — same rules apply.
+    expect(
+      classifyImportLine("import { computeContextFingerprint } from './proxy/fingerprint.js'"),
+    ).toBe('proxy import is only allowed from proxy/types.js')
+    expect(classifyImportLine("import type { NormalizedRequest } from './proxy/types.js'")).toBe(
+      'only Result and NormalizedMessage may be imported from proxy/types.js',
+    )
+    expect(
+      classifyImportLine("import type { NormalizedMessage } from './proxy/types.js'"),
+    ).toBeNull()
+    expect(classifyImportLine("type Result<T> = import('./proxy/types.js').Result<T>")).toBeNull()
+  })
+
+  it('the guard actually covers the audited violation sites (ingest.ts, recall.ts) and every engine dir', () => {
+    expect(ENGINE_ROOT_FILES).toEqual(expect.arrayContaining(['ingest.ts', 'recall.ts']))
+    expect(ENGINE_DIRS).toEqual(
+      expect.arrayContaining(['store', 'salience', 'synthesis', 'harness', 'hooks']),
+    )
   })
 })
 
@@ -63,32 +97,39 @@ async function scanEngineForViolations(): Promise<Violation[]> {
       if (!entry.isFile() || !entry.name.endsWith('.ts')) continue
 
       const parent = entry.parentPath ?? entry.path ?? dir
-      const filePath = join(parent, entry.name)
-      const source = await readFile(filePath, 'utf8')
-      const lines = source.split('\n')
-
-      lines.forEach((line, index) => {
-        const reason = classifyImportLine(line)
-        if (reason === null) return
-
-        violations.push({
-          file: relative(ROOT, filePath),
-          line: index + 1,
-          importLine: line.trim(),
-          reason,
-        })
-      })
+      violations.push(...(await scanFile(join(parent, entry.name))))
     }
+  }
+
+  for (const rootFile of ENGINE_ROOT_FILES) {
+    violations.push(...(await scanFile(join(ROOT, 'src', rootFile))))
   }
 
   return violations
 }
 
+async function scanFile(filePath: string): Promise<Violation[]> {
+  const violations: Violation[] = []
+  const source = await readFile(filePath, 'utf8')
+  source.split('\n').forEach((line, index) => {
+    const reason = classifyImportLine(line)
+    if (reason === null) return
+    violations.push({
+      file: relative(ROOT, filePath),
+      line: index + 1,
+      importLine: line.trim(),
+      reason,
+    })
+  })
+  return violations
+}
+
 function classifyImportLine(line: string): string | null {
   const trimmed = line.trim()
-  const fromMatch = trimmed.match(/\bfrom\s+['"]((?:\.\.\/)+(proxy|dashboard)\/[^'"]+)['"]/)
+  // `../` (engine subdirectories) or `./` (root-level engine files).
+  const fromMatch = trimmed.match(/\bfrom\s+['"]((?:\.{1,2}\/)+(proxy|dashboard)\/[^'"]+)['"]/)
   const inlineTypeMatch = trimmed.match(
-    /^type\s+.+?=\s*import\(\s*['"]((?:\.\.\/)+(proxy|dashboard)\/[^'"]+)['"]\s*\)\.([A-Za-z_$][\w$]*)/,
+    /^type\s+.+?=\s*import\(\s*['"]((?:\.{1,2}\/)+(proxy|dashboard)\/[^'"]+)['"]\s*\)\.([A-Za-z_$][\w$]*)/,
   )
 
   if (inlineTypeMatch) {
@@ -141,7 +182,7 @@ function formatViolations(violations: Violation[]): string {
     'Standing Order #7 violation(s):',
     ...lines,
     '',
-    'Engine layer (capture, retrieval, extraction, injection, config, utils) must not import',
+    `Engine layer (${ENGINE_DIRS.join(', ')}; src/${ENGINE_ROOT_FILES.join(', src/')}) must not import`,
     'non-utility symbols from the delivery layer (proxy, dashboard). Allowed exceptions:',
     "  - import type { Result } from '../proxy/types.js'",
     "  - import type { NormalizedMessage } from '../proxy/types.js'",

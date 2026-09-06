@@ -77,15 +77,32 @@ function truncateAssistant(text: string): string {
 }
 
 /**
+ * Cap on the USER side of an injected entry (v0.3.1, audit D9). Only the
+ * assistant side was ever truncated, so one long pasted prompt could eat the
+ * whole turn budget. ~300 chars keeps the question recognisable; the assistant
+ * answer is where the remembered reasoning lives.
+ */
+export const USER_ENTRY_MAX_CHARS = 300
+
+function truncateUser(text: string): string {
+  const flat = text.replace(/\n+/g, ' ').trim()
+  if (flat.length <= USER_ENTRY_MAX_CHARS) return flat
+  // Cut at the last word boundary inside the cap so we never split a token.
+  const cut = flat.slice(0, USER_ENTRY_MAX_CHARS)
+  const atWord = cut.lastIndexOf(' ')
+  return `${(atWord > USER_ENTRY_MAX_CHARS / 2 ? cut.slice(0, atWord) : cut).trimEnd()}…`
+}
+
+/**
  * Format a single TurnSearchResult as a dated conversation entry.
  *
  * Output format:
- *   [YYYY-MM-DD] You: {user message}
+ *   [YYYY-MM-DD] You: {user message (capped at USER_ENTRY_MAX_CHARS)}
  *   → {assistant response (possibly truncated)}
  */
 function formatTurnEntry(result: TurnSearchResult): string {
   const date = formatDate(result.turnPair.timestamp)
-  const user = result.turnPair.userContent.replace(/\n+/g, ' ').trim()
+  const user = truncateUser(result.turnPair.userContent)
   const assistant = truncateAssistant(result.turnPair.assistantContent)
   return `[${date}] You: ${user}\n→ ${assistant}`
 }
@@ -167,7 +184,14 @@ function fitProjectSection(
   return trimmed.length > 0 ? `${projectHeader}\n${trimmed}` : ''
 }
 
-/** Greedy highest-score-first turn selection within the remaining budget + maxTurns. */
+/**
+ * Greedy highest-score-first turn selection within the remaining budget + maxTurns.
+ *
+ * v0.3.1 (audit D9): an entry that does not fit is SKIPPED, not the end of the
+ * loop — one oversized top-ranked turn used to starve every smaller turn behind
+ * it (the loop `break`ed). Order is still score-first, so a smaller lower-ranked
+ * turn only gets in when the higher-ranked one genuinely cannot.
+ */
 function selectTurnEntries(sorted: TurnSearchResult[], maxTurns: number, budget: number): string[] {
   let remaining = budget
   const included: string[] = []
@@ -175,7 +199,7 @@ function selectTurnEntries(sorted: TurnSearchResult[], maxTurns: number, budget:
     if (included.length >= maxTurns) break
     const entry = formatTurnEntry(result)
     const cost = estimateTokens((included.length > 0 ? '\n\n' : '') + entry)
-    if (cost > remaining) break
+    if (cost > remaining) continue
     included.push(entry)
     remaining -= cost
   }

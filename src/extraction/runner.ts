@@ -39,6 +39,8 @@ interface ExtractionState {
   processedConversationIds: string[]
   rollingSummary: string
   lastRunAt: string | null
+  /** Owned by trigger.ts (D14) — preserved here so a save never resets it. */
+  capturedSinceLastTrigger?: number
 }
 
 interface ConvFrontmatter {
@@ -58,14 +60,33 @@ const EMPTY_STATE: ExtractionState = {
 async function loadState(walletDir: string): Promise<ExtractionState> {
   try {
     const raw = await readFile(join(walletDir, STATE_FILE), 'utf8')
-    return JSON.parse(raw) as ExtractionState
+    // The trigger may have created a minimal file (counter only) before the first
+    // run — fill any missing runner fields from the empty state.
+    const parsed = JSON.parse(raw) as Partial<ExtractionState>
+    return {
+      ...EMPTY_STATE,
+      ...parsed,
+      processedConversationIds: Array.isArray(parsed.processedConversationIds)
+        ? parsed.processedConversationIds
+        : [],
+      rollingSummary: typeof parsed.rollingSummary === 'string' ? parsed.rollingSummary : '',
+    }
   } catch {
     return { ...EMPTY_STATE }
   }
 }
 
 async function saveState(walletDir: string, state: ExtractionState): Promise<void> {
-  await writeFile(join(walletDir, STATE_FILE), JSON.stringify(state, null, 2), 'utf8')
+  // Preserve the trigger's capture counter as it is ON DISK right now (captures
+  // may have arrived during this run), not the value loaded at run start.
+  const onDisk = await loadState(walletDir)
+  const merged: ExtractionState = {
+    ...state,
+    ...(onDisk.capturedSinceLastTrigger === undefined
+      ? {}
+      : { capturedSinceLastTrigger: onDisk.capturedSinceLastTrigger }),
+  }
+  await writeFile(join(walletDir, STATE_FILE), JSON.stringify(merged, null, 2), 'utf8')
 }
 
 function parseConvFrontmatter(content: string): ConvFrontmatter | null {
