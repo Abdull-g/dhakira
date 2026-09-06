@@ -1,6 +1,17 @@
 import { parse as parseYaml } from 'yaml'
 import type { ConversationTrace } from './ingest.js'
 
+/**
+ * Capture taxonomy. v0.3.1 (audit D11): `pre_flight` was removed — nothing ever
+ * produced it (it existed only in the skip set); `error_response` now SKIPS on
+ * both the rule and heuristic paths (it used to be kept when rule-matched).
+ *
+ * Agentic turns: a `tool_intermediate` capture (the API roundtrip whose response
+ * ends in a tool call) is skipped as a capture, but its assistant text is NOT
+ * lost — the final roundtrip of the same turn carries the whole history and
+ * `extractTurnPairs` stitches the intermediate reasoning into the final pair
+ * (corpus-verified in test/capture/classifier.test.ts).
+ */
 export type CaptureCategory =
   | 'real_conversation'
   | 'title_generation'
@@ -8,7 +19,6 @@ export type CaptureCategory =
   | 'tool_intermediate'
   | 'tool_internal_autocomplete'
   | 'tool_only_roundtrip'
-  | 'pre_flight'
   | 'error_response'
 
 export interface Classification {
@@ -94,7 +104,7 @@ const SKIP_CATEGORIES = new Set<CaptureCategory>([
   'summarization',
   'tool_intermediate',
   'tool_internal_autocomplete',
-  'pre_flight',
+  'error_response',
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -152,7 +162,6 @@ function isCaptureCategory(value: string): value is CaptureCategory {
     value === 'tool_intermediate' ||
     value === 'tool_internal_autocomplete' ||
     value === 'tool_only_roundtrip' ||
-    value === 'pre_flight' ||
     value === 'error_response'
   )
 }

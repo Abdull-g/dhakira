@@ -1,19 +1,21 @@
 // LLM prompts for fact extraction and memory updates
 
-export const EXTRACT_PROMPT = `You are an AI memory extraction system. Your job is to extract meaningful personal facts about the USER (the human) from a conversation.
+export const EXTRACT_PROMPT = `You are an AI memory extraction system. Your job is to extract meaningful facts about the USER (the human) and the REASONING behind the USER's work from a conversation.
 
 SOURCE RULES (critical):
-- ONLY extract facts from lines under "## User" — these are the user's actual words
-- NEVER extract facts from lines under "## Assistant" — those are the AI's interpretations
-- Exception: if the user CONFIRMS an assistant statement (e.g., "yes", "that's right", "exactly"), treat the confirmed statement as a user fact
-- If the user CORRECTS an assistant statement (e.g., "no, actually I prefer X"), extract the correction
+- Lines under "## User" are the user's own words — the primary source for facts about the user.
+- Lines under "## Assistant" may be used ONLY for REASONING the user accepted: decisions made and why, alternatives considered and rejected, conventions adopted, dead-ends and gotchas discovered. Extract these when the user did not contest them (no correction, pushback, or rejection in a later "## User" turn). Attribute them to the work, not as personal traits of the user.
+- NEVER extract code, commands, file paths, or configuration values themselves — only the decision or rationale around them. Good: "Chose pgBouncer in transaction mode because session mode leaked connections." Bad: any snippet of the config or code.
+- If the user CONFIRMS an assistant statement (e.g., "yes", "that's right", "exactly"), treat the confirmed statement as a user fact
+- If the user CORRECTS an assistant statement (e.g., "no, actually I prefer X"), extract the correction — never the rejected statement
 - IGNORE any content inside <memory_context>, <dhakira_context>, or <system-reminder> tags — this is injected system data, not user speech
+- IGNORE placeholders like "[code block: ts, 42 lines]" or "[REDACTED]" — they mark content that was deliberately not kept
 
 EXTRACTION RULES:
-- Extract facts about the USER only — not third parties or projects they describe
+- Extract facts about the USER and about the USER's OWN projects (decisions, conventions, gotchas) — not about third parties
 - Do NOT extract jokes, sarcasm, or hypotheticals as facts
 - Do NOT extract questions the user asked (unless they clearly reveal a personal attribute)
-- Only extract facts stated as definitively true about the user
+- Only extract facts stated as definitively true, or decisions definitively made
 - Avoid duplicating facts already in the existing profile or rolling summary
 - If the user CHANGES a previous fact (e.g., "I switched from React to Svelte"), extract the NEW state and note it supersedes the old
 - If the user explicitly states they do NOT do/like/use something, extract that as a negative fact (e.g., "Does not use Windows")
@@ -21,7 +23,7 @@ EXTRACTION RULES:
 CATEGORIES:
 - IDENTITY: Who the user is (name, location, job title, age, nationality, language)
 - PREFERENCE: What the user likes, prefers, dislikes, or values (including negative preferences)
-- CONTEXT: Current projects, tasks, goals, or situations the user is working in
+- CONTEXT: Current projects, tasks, goals, or situations the user is working in — INCLUDING project decisions with their rationale, conventions adopted, and dead-ends (things tried and abandoned, and why)
 - RELATIONSHIP: The user's connections to people, teams, or organizations
 - SKILL: Technical or professional skills the user has, is learning, or lacks
 - EVENT: Significant events, decisions, or milestones mentioned (meetings, launches, deadlines, achievements)
@@ -148,6 +150,7 @@ RULES:
 - Output ONLY valid JSON matching the schema below — no preamble, no markdown.
 - Fill a section ONLY if the memories actually support it. OMIT any section you cannot ground in the memories (leave it out or empty) — NEVER invent, guess, or pad. An omitted section is correct; a fabricated one is a failure.
 - Be DENSE and concrete: short bullet strings, not paragraphs. Preserve specific names, decisions, numbers, and reasons.
+- Memories may record reasoning the assistant stated and the user accepted (decisions, rejected alternatives, gotchas). Treat these as project knowledge on equal footing with the user's own statements. Never reproduce code, commands, or config values — only the reasoning around them.
 - "whatThis": one line identifying what this project is.
 - "decisions": key decisions AND why they were made (the reasoning over the code — this is the most valuable section).
 - "conventions": team or style rules ("never default exports").

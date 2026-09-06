@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 import type { NormalizedMessage, Result } from '../proxy/types.js'
 import { generateId } from '../utils/ids.js'
 import { createLogger } from '../utils/logger.js'
+import { collapseForStorage } from './code-collapse.js'
 import type { ContentBlock, TraceMessage, TraceRole } from './ingest.js'
 import { idPathSlug, resolveContainedCapturePath } from './path-safety.js'
 import { redactSecrets } from './secrets.js'
@@ -174,8 +175,14 @@ function resetForUser(context: ExtractionContext, userContent: string): void {
 }
 
 function emitPair(context: ExtractionContext): void {
-  const userContent = redactSecrets(context.pendingUser).cleaned
-  const assistantContent = redactSecrets(context.assistantParts.join('\n')).cleaned
+  // Storage hygiene, in order: redact secrets (so a short kept snippet never
+  // carries one), then collapse long code fences + repeated output (v0.3.1 G4 —
+  // "reasoning over code": the stored, indexed, injected turn keeps the WHY, not
+  // the file). The verbatim archive in conversations/ is written elsewhere.
+  const userContent = collapseForStorage(redactSecrets(context.pendingUser).cleaned)
+  const assistantContent = collapseForStorage(
+    redactSecrets(context.assistantParts.join('\n')).cleaned,
+  )
   if (userContent.trim().length === 0 || assistantContent.trim().length === 0) return
 
   context.pairs.push({

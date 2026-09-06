@@ -476,6 +476,13 @@ Everything lives in `~/.dhakira`:
 
 It's just files. Back them up. Sync them. Move them to another machine. Grep them. They're yours.
 
+### Two layers, on purpose
+
+- **`conversations/` is the mine.** Raw archives stay **verbatim** — code, tool output, everything. Extraction and consolidation re-synthesize from this text, and a smarter future model can mine it again. Nothing here is rewritten, redacted, or expired, and it never leaves your disk unredacted (see Privacy).
+- **`turns/` is the sanitized layer.** This is what search indexes and what gets injected back into prompts. Every turn is secret-redacted, and — because Dhakira remembers the *reasoning* over code, never the code itself — fenced code blocks longer than 10 lines are replaced with `[code block: <lang>, N lines]` and runs of repeated output are collapsed. Short snippets (≤ 10 lines) are kept: a three-line example is often the clearest statement of a convention.
+
+This split is intentional. If you want the code, it is in the archive; if you want to be reminded *why* you wrote it that way, that is what gets injected.
+
 ## Privacy
 
 **What Dhakira stores:**

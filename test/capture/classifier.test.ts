@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { classifyConversation, parseClassifierRulesYaml } from '../../src/capture/classifier.ts'
 import { ingestAnthropicTrace } from '../../src/capture/ingest.ts'
+import { sanitizeTrace } from '../../src/capture/sanitizer.ts'
+import { extractTurnPairs } from '../../src/capture/turns.ts'
 
 interface CorpusRecord {
   id: string
@@ -215,6 +217,93 @@ describe('classifyConversation', () => {
       category: 'real_conversation',
       keep: true,
     })
+  })
+
+  // ---- v0.3.1 G4.3 — taxonomy fixes (audit D11 / C5) -------------------------
+
+  it('error_response is SKIPPED on the heuristic path (response carries an error object)', async () => {
+    const classification = await classifyRecord({
+      id: 'error-fixture',
+      url: 'https://api.anthropic.com/v1/messages',
+      reqBody: {
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'Tell me about Dhakira and how memory works.' }],
+      },
+      respBodyRaw: JSON.stringify({
+        type: 'error',
+        error: { type: 'overloaded_error', message: 'Overloaded' },
+      }),
+      respStatus: 529,
+    })
+    expect(classification).toMatchObject({ category: 'error_response', keep: false })
+  })
+
+  it('error_response is SKIPPED on the rule path too (used to be kept when rule-matched)', () => {
+    const rules = parseClassifierRulesYaml(
+      [
+        'error_response:',
+        '  - id: any-error-shape',
+        '    require_all:',
+        '      response_matches_regex: "\\"error\\""',
+      ].join('\n'),
+    )
+    const trace = ingestAnthropicTrace({
+      requestBody: {
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: 'Tell me about Dhakira and how memory works.' }],
+      },
+      responseBody: JSON.stringify({ error: { type: 'rate_limit_error', message: 'slow down' } }),
+      sourceTool: 'claude-code',
+    })
+    if (!trace.ok) throw trace.error
+    expect(classifyConversation(trace.value, rules)).toMatchObject({
+      category: 'error_response',
+      keep: false,
+      ruleId: 'any-error-shape',
+    })
+  })
+
+  it('pre_flight is gone from the taxonomy: a YAML rule under it is ignored', () => {
+    const rules = parseClassifierRulesYaml(
+      ['pre_flight:', '  - id: x', '    require_all:', '      model_includes: "haiku"'].join('\n'),
+    )
+    expect(rules).toEqual({})
+  })
+
+  it('CORPUS: the final roundtrip of an agentic turn is KEPT and its stitched pair retains the intermediate assistant reasoning that the tool_intermediate skip dropped as a capture', async () => {
+    // cad36056 = "Reading `sample.js` now." + tool_use → tool_intermediate (skipped as a capture)
+    // fcfa97f4 = the same turn's final roundtrip: history + tool_result + final text → kept
+    const records = await loadV2Corpus()
+    const intermediate = records.find((r) => r.id.startsWith('cad36056'))
+    const final = records.find((r) => r.id.startsWith('fcfa97f4'))
+    if (!intermediate || !final) throw new Error('corpus records missing')
+
+    expect(await classifyRecord(intermediate)).toMatchObject({
+      category: 'tool_intermediate',
+      keep: false,
+    })
+    const finalClassification = await classifyRecord(final)
+    expect(finalClassification.keep).toBe(true)
+
+    const trace = ingestAnthropicTrace({
+      requestBody: final.reqBody,
+      responseBody: final.respBodyText ?? '',
+      responseSseEvents: final.respSseEvents,
+      sourceTool: 'claude-code',
+    })
+    if (!trace.ok) throw trace.error
+    const pairs = extractTurnPairs(
+      sanitizeTrace(trace.value).trace.messages,
+      'claude-code',
+      final.id,
+      new Date(),
+    )
+    expect(pairs).toHaveLength(1)
+    // The narration from the skipped intermediate capture AND the final answer, one pair.
+    expect(pairs[0]?.assistantContent).toContain('Reading `sample.js` now.')
+    expect(pairs[0]?.assistantContent).toMatch(/hello world/)
   })
 })
 
